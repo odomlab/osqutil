@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<config>
+  <section name="Host">
+    <option name="user">fnc-odompipe</option>
+    <option name="datahost">uk-cri-lsrv01</option>
+    <option name="group">odompipe</option>
+    <option name="defaultproject">all</option>
+  </section>
+  <section name="some test ideas">
+    <option name="list_value">
+      <value>item 1</value>
+      <value>item 2</value>
+    </option>
+    <option name="dict_value">
+      <value name="key name 1">value 1</value>
+      <value name="key name 2">value 2</value>
+      <value name="key name 3 (sublist)">
+        <value>list item 3</value>
+        <value>list item 4</value>
+      </value>
+      <value name="key name 4 (subdict)">
+        <value name="dict key 3">dict value 3</value>
+        <value name="dict key 4">dict value 4</value>          
+      </value>
+    </option>
+  </section>
+</config>
+

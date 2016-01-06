@@ -1,0 +1,44 @@
+#!/usr/local/bin/python
+import sys
+import os
+import smtplib
+import argparse
+from email.mime.text import MIMEText
+
+"""Sends mail with given text, mail address and subject line."""
+__author__ = "Margus Lukk"
+__date__ = "29 Nov 2012"
+__version__ = "0.1"
+__credits__ = "Margus Lukk"
+
+def send_mail(fromMail,toMails,subject,text):
+    mail = MIMEText(text)
+    mail['Subject'] = subject
+    mail['From'] = fromMail
+    mail['To'] = ",".join(toMails)
+    conn = smtplib.SMTP(host="127.0.0.1")
+    conn.sendmail(fromMail,toMails,"%s" % (mail,))
+    conn.close()
+
+toMail = ["margus.lukk@cruk.cam.ac.uk"]
+fromMail = "margus.lukk@cruk.cam.ac.uk"
+maxSubjectLength = 30
+
+parser = argparse.ArgumentParser(
+        description='Sends mail with given text, mail address and subject line.')
+parser.add_argument('-s', '--subject', dest='subject', required=False, type=str, help='Text for the Subject line of the email. Default are first 30 characters of the text.')
+parser.add_argument('-t', '--to', dest='toMail', required=False, type=str, help='To address for the email. Default is %s' % ",".join(toMail))
+parser.add_argument('-f', '--from', dest='fromMail', required=False, type=str, help='From address for the email. Default is %s' % fromMail)
+parser.add_argument('text', metavar='text', type=str, help='Email text.')
+args = parser.parse_args()
+
+if args.subject is None:
+    if args.text.__len__() > maxSubjectLength:
+        args.subject = args.text[:30] + " ..."
+    else:
+        args.subject = args.text
+if args.toMail is not None:
+    toMail = [args.toMail]
+if args.fromMail is None:
+    args.fromMail = fromMail
+send_mail(fromMail,toMail,args.subject,args.text)

@@ -1,0 +1,30 @@
+<?xml version='1.0' encoding='utf-8'?>
+<config>
+  <section name="Host">
+    <option name="datahost">data.host.name</option>
+    <option name="group">groupname</option>
+    <option name="defaultproject">all</option>
+  </section>
+  <section name="Cluster">
+    <option name="cluster">cluster.host.name</option>
+    <option name="clusteruser">username</option>
+    <option name="clusterstdoutdir">/work_area/pipeline/stdout/</option>
+    <option name="clusterworkdir">/work_area/pipeline/tmp/</option>
+    <option name="clusterpath">/install_dir/pipeline/bin:/usr/local/bin</option>
+    <option name="clustergenomedir">/work_area/genomes</option>
+  </section>
+  <section name="Path">
+    <option name="gzsuffix">.gz</option>
+    <option name="plotter">/usr/local/bin/gnuplot</option>
+  </section>
+  <section name="Pipeline">
+    <option name="aligner">bwa</option>
+    <option name="read_reallocator">reallocateReads</option>
+    <option name="read_sorter">samtools</option>
+    <option name="nonuniquereads">30</option>
+    <option name="reallocation_factors">
+      <value>PolIII</value>
+      <value>TFIIIC</value>
+    </option>
+  </section>
+</config>
