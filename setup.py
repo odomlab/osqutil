@@ -38,4 +38,5 @@ setup(
   install_requires=[
 # Do not add anything here! This package is supposed to rely on core python modules only.
   ],
+  zip_safe=False,  # Prevents zipping of the installed egg, for accessing config defaults.
 )
