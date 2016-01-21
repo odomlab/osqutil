@@ -788,18 +788,140 @@ class BwaAlignmentManager(AlignmentManager):
   Subclass of AlignmentManager implementing the bwa-specific
   components of our primary alignment pipeline.
   '''
-  def __init__(self, nocc=None, *args, **kwargs):
+  def __init__(self, nocc=None, bwa_algorithm='aln', *args, **kwargs):
+
+    assert(bwa_algorithm in ('aln', 'mem'))
+
     super(BwaAlignmentManager, self).__init__(*args, **kwargs)
 
     # These are now identified by passing in self.conf.clusterpath to
     # the remote command.
     self.bwa_prog      = 'bwa'
+    self.bwa_algorithm = bwa_algorithm
 
     if nocc:
-      self.nocc = "-n %s" % (nocc,)
+
+      if self.bwa_algorithm is 'mem':
+        raise StandardError("The nocc argument is not supported by bwa mem. Try bwa aln instead.")
+
+      self.nocc = '-n %s' % (nocc,)
+
     else:
       self.nocc = ''
     
+  def _run_pairedend_bwa_aln(self, fqname, fqname2, genome, jobtag, delay=0):
+    '''
+    Run bwa aln on paired-ended sequencing data.
+    '''
+    jobname1  = "%s_sai1" % (jobtag,)
+    jobname2  = "%s_sai2" % (jobtag,)
+    sai_file1 = "%s.sai" % fqname
+    sai_file2 = "%s.sai" % fqname2
+
+    jobname_bam = "%s_bam" % (jobtag,)
+    outbam      = bash_quote(fqname + ".bam")
+
+    # Run bwa aln
+    cmd1 = "%s aln %s %s > %s" % (self.bwa_prog, genome,
+                                  bash_quote(fqname),
+                                  bash_quote(sai_file1))
+    cmd2 = "%s aln %s %s > %s" % (self.bwa_prog, genome,
+                                  bash_quote(fqname2),
+                                  bash_quote(sai_file2))
+
+    # Run bwa sampe
+    cmd3  = ("%s sampe %s %s %s %s %s %s"
+             % (self.bwa_prog, self.nocc, genome, bash_quote(sai_file1),
+                bash_quote(sai_file2), bash_quote(fqname), bash_quote(fqname2)))
+
+    # Convert to bam
+    cmd3 += (" | %s view -b -S -u - > %s.unsorted" % (self.samtools_prog, outbam))
+
+    # Sort the bam
+    cmd3 += (" && %s sort %s.unsorted %s" % (self.samtools_prog, outbam, bash_quote(fqname)))
+
+    # Cleanup
+    cmd3 += (" && rm %s %s %s %s %s.unsorted"
+             % (bash_quote(sai_file1), bash_quote(sai_file2),
+                bash_quote(fqname), bash_quote(fqname2), outbam))
+
+    LOGGER.info("starting bwa step1 on '%s'", fqname)
+    jobid_sai1 = self._submit_lsfjob(cmd1, jobname1, sleep=delay)
+    LOGGER.debug("got job id '%s'", jobid_sai1)
+    LOGGER.info("starting bwa step1 on '%s'", fqname2)
+    jobid_sai2 = self._submit_lsfjob(cmd2, jobname2, sleep=delay)
+    LOGGER.debug("got job id '%s'", jobid_sai2)
+
+    if jobid_sai1 and jobid_sai2:
+      LOGGER.info("preparing bwa step2 on '%s'", fqname)
+      jobid_bam = self._submit_lsfjob(cmd3, jobname_bam,
+                                      (jobid_sai1, jobid_sai2), sleep=delay)
+      LOGGER.debug("got job id '%s'", jobid_bam)
+    else:
+      LOGGER.error("bjob submission for bwa step1 for '%s' or '%s' failed!",
+                   fqname, fqname2)
+
+    return(jobid_bam, outbam)
+
+  def _run_singleend_bwa_aln(self, fqname, genome, jobtag, delay=0):
+    '''
+    Run bwa aln on single-ended sequencing data.
+    '''
+    jobname_bam = "%s_bam" % (jobtag,)
+    outbam      = bash_quote(fqname + ".bam")
+
+    # Run bwa aln
+    cmd  = ("%s aln %s %s" % (self.bwa_prog, genome, bash_quote(fqname)))
+
+    # Run bwa samse
+    cmd += (" | %s samse %s %s - %s" % (self.bwa_prog, self.nocc,
+                                        genome, bash_quote(fqname)))
+    # Convert to bam
+    cmd += (" | %s view -b -S -u - > %s.unsorted" % (self.samtools_prog, outbam))
+
+    # Sort the output bam
+    cmd += (" && %s sort %s.unsorted %s" % (self.samtools_prog,
+                                            outbam, bash_quote(fqname)))
+    # Clean up
+    cmd += (" && rm %s %s.unsorted" % (bash_quote(fqname), outbam))
+        
+    LOGGER.info("starting bwa on '%s'", fqname)
+    LOGGER.debug(cmd)
+    jobid_bam = self._submit_lsfjob(cmd, jobname_bam, sleep=delay)
+    LOGGER.debug("got job id '%s'", jobid_bam)
+
+    return(jobid_bam, outbam)
+
+  def _run_bwa_mem(self, fqnames, genome, jobtag, delay=0):
+    '''
+    Run bwa mem on single- or paired-end sequencing data.
+    '''
+    assert(len(fqnames) in (1, 2))
+
+    jobname_bam = "%s_bam" % (jobtag,)
+    outbambase  = bash_quote(fqnames[0])
+    outbam      = outbambase + ".bam"
+
+    # Run bwa mem
+    quoted_fqnames = " ".join([ bash_quote(fqn) for fqn in fqnames ])
+    cmd  = ("%s mem %s %s" % (self.bwa_prog, genome, quoted_fqnames))
+
+    # Convert to bam
+    cmd += (" | %s view -b -S -u - > %s.unsorted" % (self.samtools_prog, outbam))
+
+    # Sort the output bam
+    cmd += (" && %s sort %s.unsorted %s" % (self.samtools_prog,
+                                            outbam, outbambase))
+    # Clean up
+    cmd += (" && rm %s %s.unsorted" % (quoted_fqnames, outbam))
+        
+    LOGGER.info("Starting bwa mem on fastq files: %s", quoted_fqnames)
+    LOGGER.debug(cmd)
+    jobid_bam = self._submit_lsfjob(cmd, jobname_bam, sleep=delay)
+    LOGGER.debug("got job id '%s'", jobid_bam)
+
+    return(jobid_bam, outbam)
+
   def run_bwas(self, genome, paired, fq_files, fq_files2):
     '''
     Submits bwa alignment jobs for list of fq files to LSF cluster.
@@ -811,78 +933,34 @@ class BwaAlignmentManager(AlignmentManager):
     # in current name
     for fqname in fq_files:
       donumber = fqname.split("_")[0]
-      out = bash_quote(fqname + ".bam")
-      out_names.append(out)
-      jobname_bam = "%s_%s_bam" % (donumber, current)
+      jobtag   = "%s_%s" % (donumber, current)
 
-      if paired:
-        jobname1 = "%s_%s_sai1" % (donumber, current)
-        jobname2 = "%s_%s_sai2" % (donumber, current)
-        sai_file1 = "%s.sai" % fqname
-        sai_file2 = "%s.sai" % fq_files2[current]
+      # Older bwa aln algorithm.
+      if self.bwa_algorithm is 'aln':
 
-        # Run bwa aln
-        cmd1 = "%s aln %s %s > %s" % (self.bwa_prog, genome,
-                                      bash_quote(fqname),
-                                      bash_quote(sai_file1))
-        cmd2 = "%s aln %s %s > %s" % (self.bwa_prog, genome,
-                                      bash_quote(fq_files2[current]),
-                                      bash_quote(sai_file2))
+        if paired:
 
-        # Run bwa sampe
-        cmd3  = ("%s sampe %s %s %s %s %s %s"
-                 % (self.bwa_prog, self.nocc, genome, bash_quote(sai_file1),
-                    bash_quote(sai_file2), bash_quote(fqname), bash_quote(fq_files2[current])))
-
-        # Convert to bam
-        cmd3 += (" | %s view -b -S -u - > %s.unsorted" % (self.samtools_prog, out))
-
-        # Sort the bam
-        cmd3 += (" && %s sort %s.unsorted %s" % (self.samtools_prog, out, bash_quote(fqname)))
-
-        # Cleanup
-        cmd3 += (" && rm %s %s %s %s %s.unsorted"
-                 % (bash_quote(sai_file1), bash_quote(sai_file2),
-                    bash_quote(fqname), bash_quote(fq_files2[current]), out))
-
-        LOGGER.info("starting bwa step1 on '%s'", fqname)
-        jobid_sai1 = self._submit_lsfjob(cmd1, jobname1, sleep=current)
-        LOGGER.debug("got job id '%s'", jobid_sai1)
-        LOGGER.info("starting bwa step1 on '%s'", fq_files2[current])
-        jobid_sai2 = self._submit_lsfjob(cmd2, jobname2, sleep=current)
-        LOGGER.debug("got job id '%s'", jobid_sai2)
-
-        if jobid_sai1 and jobid_sai2:
-          LOGGER.info("preparing bwa step2 on '%s'", fqname)
-          jobid_bam = self._submit_lsfjob(cmd3, jobname_bam,
-                                          (jobid_sai1, jobid_sai2), sleep=current)
-          LOGGER.debug("got job id '%s'", jobid_bam)
-          job_ids.append(jobid_bam)
+          (jobid, outbam) = self._run_pairedend_bwa_aln(fqname, fq_files2[current],
+                                                        genome, jobtag, current)
         else:
-          LOGGER.error("bjob submission for bwa step1 for '%s' or '%s' failed!",
-                       fqname, fq_files2[current])
-      else:
-
-        # Run bwa aln
-        cmd  = ("%s aln %s %s" % (self.bwa_prog, genome, bash_quote(fqname)))
-
-        # Run bwa samse
-        cmd += (" | %s samse %s %s - %s" % (self.bwa_prog, self.nocc,
-                                            genome, bash_quote(fqname)))
-        # Convert to bam
-        cmd += (" | %s view -b -S -u - > %s.unsorted" % (self.samtools_prog, out))
-
-        # Sort the output bam
-        cmd += (" && %s sort %s.unsorted %s" % (self.samtools_prog,
-                                                out, bash_quote(fqname)))
-        # Clean up
-        cmd += (" && rm %s %s.unsorted" % (bash_quote(fqname), out))
         
-        LOGGER.info("starting bwa on '%s'", fqname)
-        LOGGER.debug(cmd)
-        jobid_bam = self._submit_lsfjob(cmd, jobname_bam, sleep=current)
-        LOGGER.debug("got job id '%s'", jobid_bam)
-        job_ids.append(jobid_bam)
+          (jobid, outbam) = self._run_singleend_bwa_aln(fqname,
+                                                        genome, jobtag, current)
+
+      # Newer bwa mem algorithm.
+      elif self.bwa_algorithm is 'mem':
+
+        fqnames = [ fqname ]
+        if paired:
+          fqnames.append(fq_files2[current])
+          
+        (jobid, outbam) = self._run_bwa_mem(fqnames, genome, jobtag, current)
+        
+      else:
+        raise ValueError("BWA algorithm not recognised: %s" % self.bwa_algorithm)
+
+      job_ids.append(jobid)
+      out_names.append(outbam)
       current += 1
 
     return (job_ids, out_names)
