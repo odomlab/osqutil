@@ -16,6 +16,7 @@ from tempfile import TemporaryFile
 import stat
 import grp
 import gzip
+from contextlib import contextmanager
 import hashlib
 from subprocess import Popen, CalledProcessError, PIPE
 from distutils import spawn
@@ -148,6 +149,21 @@ def rezip_file(fname, dest=None, delete=True, compresslevel=6, overwrite=False):
     os.unlink(fname)
 
   return dest
+
+@contextmanager
+def flexi_open(filename, *args, **kwargs):
+  '''
+  Simple context manager function to seamlessly handle gzipped and
+  uncompressed files.
+  '''
+  if is_zipped(filename):
+    handle = gzip.open(filename, *args, **kwargs)
+  else:
+    handle = open(filename, *args, **kwargs)
+
+  yield handle
+
+  handle.close()
 
 def _checksum_fileobj(fileobj, blocksize=65536):
   '''
@@ -460,6 +476,22 @@ def sanitize_samplename(samplename):
     return None
   sanity_re = re.compile(r'([ \/\(\);&|]+)')
   return(sanity_re.sub('_', samplename))
+
+def determine_readlength(fastq):
+  '''
+  Guess the length of the reads in the fastq file. Assumes that the
+  first read in the file is representative.
+  '''
+  # Currently just assumes that the second line is the first read, and
+  # that it is representative.
+  LOGGER.debug("Finding read length from fastq file %s...", fastq)
+  rlen = None
+  with flexi_open(fastq) as reader:
+    for _num in range(2):
+      line = reader.next()
+    rlen = len(line.rstrip('\n'))
+
+  return rlen
 
 def memoize(func):
   '''

@@ -50,11 +50,6 @@ if __name__ == '__main__':
   PARSER.add_argument('--rcp', type=str, dest='rcp',
                       help='Remote file copy (rcp) target.')
 
-#  Currently unused:  
-#  PARSER.add_argument('--force', dest='force', action='store_true',
-#                      default=False,
-#                      help='Overwrite existing output file.')
-
   PARSER.add_argument('--cleanup', dest='cleanup', action='store_true',
                       help='Delete all temporary files.')
 
@@ -66,6 +61,8 @@ if __name__ == '__main__':
 
   ARGS = PARSER.parse_args()
 
+  # We allow the default bwa algorithm to be set here, since it does
+  # not affect the merging step.
   BSUB = BwaAlignmentManager(debug      = ARGS.debug,
                              cleanup    = ARGS.cleanup,
                              loglevel   = ARGS.loglevel,

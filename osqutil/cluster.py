@@ -788,8 +788,10 @@ class BwaAlignmentManager(AlignmentManager):
   Subclass of AlignmentManager implementing the bwa-specific
   components of our primary alignment pipeline.
   '''
-  def __init__(self, nocc=None, bwa_algorithm='aln', *args, **kwargs):
+  def __init__(self, nocc=None, bwa_algorithm=None, *args, **kwargs):
 
+    if bwa_algorithm is None:
+      bwa_algorithm = 'aln'
     assert(bwa_algorithm in ('aln', 'mem'))
 
     super(BwaAlignmentManager, self).__init__(*args, **kwargs)

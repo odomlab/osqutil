@@ -42,6 +42,9 @@ if __name__ == '__main__':
   PARSER.add_argument('files', metavar='<fastq file(s)>', type=str, nargs='+',
                       help='The fastq files to align.')
 
+  PARSER.add_argument('--algorithm', type=str, dest='algorithm', choices=('aln', 'mem'),
+                      help='The bwa algorithm to use (aln or mem).')
+
   PARSER.add_argument('--sample', type=str, dest='sample',
                       help='The sample name used to tag the output bam read group.')
 
@@ -62,9 +65,6 @@ if __name__ == '__main__':
 
   PARSER.add_argument('--n_occ', dest='nocc', type=str,
                       help='Number of occurrences of non-unique reads to keep.')
-# Currently unused:
-#  PARSER.add_argument('--bwaoptions', type=str, dest='bwaoptions',
-#                      help='BWA options as a string.')
 
   PARSER.add_argument('-d', '--debug', dest='debug', action='store_true',
                       help='Turn on debugging output.')
@@ -77,6 +77,7 @@ if __name__ == '__main__':
                              split_read_count = ARGS.reads,
                              group      = ARGS.group,
                              nocc       = ARGS.nocc,
+                             bwa_algorithm = ARGS.algorithm,
                              merge_prog = spawn.find_executable('cs_runBwaWithSplit_Merge.py',
                                                                 path=os.environ['PATH']))
 
