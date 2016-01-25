@@ -335,7 +335,7 @@ class RemoteJobRunner(JobRunner):
       return call_subprocess(cmd, shell=True, path=self.config.hostpath)
     return None
 
-  def remote_copy_files(self, filenames, destnames=None):
+  def remote_copy_files(self, filenames, destnames=None, same_permissions=False):
     '''
     Copy a set of files across to the remote working directory.
     '''
@@ -355,11 +355,14 @@ class RemoteJobRunner(JobRunner):
       # both the cluster and the data transfer host. Note that this
       # needs an appropriate ssh key to be authorised on both the
       # transfer host and the cluster host.
-      cmd = " ".join(('scp', '-P', str(self.remote_port),
-                      '-p', '-q', bash_quote(fromfn),
-                      "%s@%s:%s" % (self.remote_user,
-                                    self.transfer_host,
-                                    quote(destfile))))
+      cmdbits = ['scp', '-P', str(self.remote_port)]
+      if same_permissions: # default is to use the configured umask.
+        cmdbits += ['-p']
+      cmdbits += ['-q', bash_quote(fromfn),
+                  "%s@%s:%s" % (self.remote_user,
+                                self.transfer_host,
+                                quote(destfile))]
+      cmd = " ".join(cmdbits)
 
       LOGGER.debug(cmd)
       if not self.test_mode:
