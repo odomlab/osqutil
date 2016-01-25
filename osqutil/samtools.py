@@ -5,6 +5,7 @@ e.g. to convert between bam and bed file formats.'''
 
 import os
 import sys
+import re
 
 from .utilities import read_file_to_key_value, call_subprocess
 from .config import Config
@@ -15,14 +16,53 @@ LOGGER = configure_logging('samtools')
 
 def count_bam_reads(bam):
   '''
-  Quick function to count the total number of reads in a bam file.
+  Quick function to count the total number of reads in a bam
+  file. We discard supplementary alignments, introduced by bwa mem and
+  other more recent alignment algorithms.
   '''
   LOGGER.info("Checking number of reads in bam file %s", bam)
   cmd  = (CONFIG.read_sorter, 'flagstat', bam)
   pout = call_subprocess(cmd, path=CONFIG.hostpath)
   numreads = int(pout.readline().split()[0])
+  for line in pout:
+    bits = [ x.strip() for x in line.split() ]
+    print bits[3]
+
+    # Catch annoying samtools typo and any future correction.
+    if bits[3] in ('supplimentary', 'supplementary'):
+      print bits[0]
+      numreads -= int(bits[0])
 
   return numreads
+
+def identify_bwa_algorithm(bam):
+  '''
+  Function which looks at the bam file header to try and identify
+  whether bwa aln or bwa mem was used. Requires a recent version of
+  bwa. Therefore if the appropriate annotation is not found, it is
+  assumed that bwa aln was used. Function will likely raise an error if a
+  non-bwa bam file is tested.
+  '''
+  LOGGER.info("Checking BWA algorithm bam file %s", bam)
+  cmd  = (CONFIG.read_sorter, 'view', '-H', bam)
+  pout = call_subprocess(cmd, path=CONFIG.hostpath)
+
+  algo = 'aln'
+
+  for line in pout:
+    bits = [ x.strip() for x in line.split("\t") ]
+    if bits[0] == '@PG':
+      fields = dict( field.split(':', 1) for field in bits
+                     if not re.match('^@', field) )
+      if 'CL' in fields:
+        (prog, algo, rest) = fields['CL'].split(" ", 2)
+        if prog != 'bwa':
+          raise ValueError("Expected bwa aligner, found %s" % prog)
+        if algo == 'samse': # aln is implied
+          algo = 'aln'
+        break # Just take the first PG group
+
+  return algo
 
 class BamToBedConverter(object):
 
