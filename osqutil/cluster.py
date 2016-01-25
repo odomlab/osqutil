@@ -803,7 +803,7 @@ class BwaAlignmentManager(AlignmentManager):
 
     if nocc:
 
-      if self.bwa_algorithm is 'mem':
+      if self.bwa_algorithm == 'mem':
         raise StandardError("The nocc argument is not supported by bwa mem. Try bwa aln instead.")
 
       self.nocc = '-n %s' % (nocc,)
@@ -938,7 +938,7 @@ class BwaAlignmentManager(AlignmentManager):
       jobtag   = "%s_%s" % (donumber, current)
 
       # Older bwa aln algorithm.
-      if self.bwa_algorithm is 'aln':
+      if self.bwa_algorithm == 'aln':
 
         if paired:
 
@@ -950,7 +950,7 @@ class BwaAlignmentManager(AlignmentManager):
                                                         genome, jobtag, current)
 
       # Newer bwa mem algorithm.
-      elif self.bwa_algorithm is 'mem':
+      elif self.bwa_algorithm == 'mem':
 
         fqnames = [ fqname ]
         if paired:
