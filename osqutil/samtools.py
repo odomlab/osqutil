@@ -26,11 +26,9 @@ def count_bam_reads(bam):
   numreads = int(pout.readline().split()[0])
   for line in pout:
     bits = [ x.strip() for x in line.split() ]
-    print bits[3]
 
     # Catch annoying samtools typo and any future correction.
     if bits[3] in ('supplimentary', 'supplementary'):
-      print bits[0]
       numreads -= int(bits[0])
 
   return numreads
