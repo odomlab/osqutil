@@ -1030,10 +1030,7 @@ class TophatAlignmentManager(AlignmentManager):
 
       # Used as a job ID and also as an output directory, so we want
       # it fairly collision-resistant.
-      if donumber is None: # unusual filename, non-repository.
-        jobname_bam = "%s_tophat" % fqname
-      else:
-        jobname_bam = "%s_%s%02d_%s_tophat" % (donumber, facility, int(lanenum), current)
+      jobname_bam = "%s_tophat" % fqname
 
       out = bash_quote(fqname + ".bam")
       out_names.append(out)
