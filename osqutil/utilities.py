@@ -16,6 +16,7 @@ from tempfile import TemporaryFile
 import stat
 import grp
 import gzip
+import bz2
 from contextlib import contextmanager
 import hashlib
 from subprocess import Popen, CalledProcessError, PIPE
@@ -178,6 +179,8 @@ def flexi_open(filename, *args, **kwargs):
   '''
   if is_zipped(filename):
     handle = gzip.open(filename, *args, **kwargs)
+  elif is_bzipped(filename):
+    handle = bz2.BZ2File(filename, *args, **kwargs)
   else:
     handle = open(filename, *args, **kwargs)
 
