@@ -35,7 +35,8 @@ def read_file_to_key_value(fname, sep):
       keyvalue[key] = value
   return keyvalue
 
-def trim_bed_for_overhanging_regions(infile, fnchrlen, outfile, truncate=False, workdir='.'):
+def trim_bed_for_overhanging_regions(infile, fnchrlen, outfile,
+                                     truncate=False, add_header=False, workdir='.'):
 
   """Removes regions that have been aligned over the edge of the
   chromosome from the bed file. Arguments: infile - bed file name,
@@ -56,7 +57,28 @@ def trim_bed_for_overhanging_regions(infile, fnchrlen, outfile, truncate=False, 
   skipped   = 0
   truncated = 0
 
+  if add_header:
+
+    # Add a basic track header for UCSC upload. Future versions may
+    # want to allow for greater customisation.
+    knownexts = dict(bgr='bedGraph',
+                     bed='bed')
+    parts = os.path.splitext(infile)
+    if len(parts) != 2:
+      raise ValueError("Filename does not appear to have an extension: %s" % infile)
+    basename = parts[0]
+    filetype = knownexts.get(parts[1][1:], 'unknown')
+    outfile.write(("""track type=%s name="%s" description="%s" visibility=2"""
+                   + """ color=255,0,0 windowingFunction=maximum alwaysZero=ON\n""")
+                  % (filetype, basename, basename))
+
   for fline in open(infile):
+
+    # Skip any input header line. A better fix would detect this
+    # earlier and skip the add_header step above (FIXME).
+    if fline[:5] == 'track':
+      outfile.write(fline)
+      continue
 
     fcols  = fline.split("\t")
     chrlen = chrLenDict.get(fcols[0], None)
@@ -86,7 +108,7 @@ def trim_bed_for_overhanging_regions(infile, fnchrlen, outfile, truncate=False, 
           
   return (skipped, truncated)
 
-def trim_bed_local(fname, chrlength, workdir='.', truncate=False):
+def trim_bed_local(fname, chrlength, workdir='.', truncate=False, add_header=False):
 
   '''Trim a bed file according to the chromosome lengths in the
   chrlength file.'''
@@ -99,17 +121,20 @@ def trim_bed_local(fname, chrlength, workdir='.', truncate=False):
   fnouttmp = tempfile.NamedTemporaryFile(dir=workdir, delete=False)
 
   (skipped, truncated) = trim_bed_for_overhanging_regions(fname, chrlength,
-                                                      fnouttmp, truncate=truncate)
+                                                          fnouttmp, truncate=truncate,
+                                                          add_header=add_header)
 
   if skipped or truncated:
     print "%s overhanging regions removed." % skipped
     print "%s overhanging regions truncated." % truncated
-    print "Renaming trimmed output file to %s." % fnout
-    os.rename(fnouttmp.name, fnout)
   else:
-    print "No overhanging regions found! Removing temporary file %s." % fnouttmp
-    os.unlink(fnouttmp)
-  
+    print "No overhanging regions found!"
+
+  # This keeps the header (if added) even in cases where no regions
+  # were altered.
+  print "Renaming trimmed output file to %s." % fnout
+  os.rename(fnouttmp.name, fnout)
+
 ################## M A I N ########################
 
 if __name__ == '__main__':
@@ -143,6 +168,11 @@ if __name__ == '__main__':
       + ' trim the edge so that it falls within the genome boundaries.'
       + ' This is useful for processing peak caller output.')
 
+  PARSER.add_argument(
+      '--add-header', dest='header', action='store_true',
+      help='Add a header to the output file to allow it, for example,'
+      + ' to be uploaded directly to the UCSC genome browser.')
+
   ARGS = PARSER.parse_args()
 
   if not os.path.exists(ARGS.bedfile):
@@ -151,4 +181,4 @@ if __name__ == '__main__':
     sys.exit(1)
     
   trim_bed_local(ARGS.bedfile, chrlength=ARGS.chrlength,
-               workdir=ARGS.dir, truncate=ARGS.truncate)
+                 workdir=ARGS.dir, truncate=ARGS.truncate, add_header=ARGS.header)
