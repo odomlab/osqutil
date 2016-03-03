@@ -16,7 +16,8 @@ from tempfile import gettempdir
 from shutil import move
 
 from osqutil.utilities import call_subprocess, bash_quote, \
-    is_zipped, set_file_permissions, BamPostProcessor, parse_repository_filename
+    is_zipped, is_bzipped, set_file_permissions, BamPostProcessor, \
+    parse_repository_filename
 
 from osqutil.config import Config
 
@@ -368,10 +369,14 @@ class RemoteJobRunner(JobRunner):
       if not self.test_mode:
         call_subprocess(cmd, shell=True, path=self.config.hostpath)
 
-  def remote_uncompress_file(self, fname):
+  def remote_uncompress_file(self, fname, zipcommand='gzip'):
     '''
-    Given a remote filename, run gunzip via ssh pipe to uncompress
-    it. Return the filename with .gz suffix removed.
+    Given a remote filename, run the specified zip command via ssh
+    pipe to uncompress it. Return the filename with .gz/.bz2 suffix
+    removed. Note that the zip command must understand -f and -d
+    options as typically passed to gzip, and must strip off the
+    filename extension for the uncompressed output file as one would
+    expect.
     '''
     # Note that we're assuming that the name extensions reflect the
     # compression status.
@@ -383,12 +388,13 @@ class RemoteJobRunner(JobRunner):
 ##  square-bracket quoting.
 #    destfile = bash_quote(destfile)
 
-    # Assumes that gzip is in the executable path on the remote server.
+    # Assumes that gzip/bzip2/whatever is in the executable path on
+    # the remote server.
     LOGGER.info("Uncompressing remote file %s", fname)
-    cmd = " ".join(('gzip -f -d', quote(destfile)))
+    cmd = " ".join(('%s -f -d' % zipcommand, quote(destfile)))
     self.run_command(cmd, command_builder=SimpleCommand())
 
-    # Remove the .gz extension.
+    # Remove the filename extension.
     return os.path.splitext(fname)[0]
 
   def transfer_data(self, filenames, destnames=None):
@@ -403,14 +409,16 @@ class RemoteJobRunner(JobRunner):
     # Copy the files across.
     self.remote_copy_files(filenames, destnames)
 
-    # Next, call remote gunzip on any files which need it.
+    # Next, call uncompress any files which need it.
     uncomp_names = []
     for num in range(len(destnames)):
 
       # We have to test the file we copied over, since we'll be
       # reading its header.
       if is_zipped(filenames[num]):
-        uncomp = self.remote_uncompress_file(destnames[num])
+        uncomp = self.remote_uncompress_file(destnames[num], zipcommand='gzip')
+      elif is_bzipped(filenames[num]):
+        uncomp = self.remote_uncompress_file(destnames[num], zipcommand='bzip2')
       else:
         uncomp = os.path.join(self.remote_wdir, destnames[num])
       uncomp_names.append(uncomp)
@@ -1022,10 +1030,7 @@ class TophatAlignmentManager(AlignmentManager):
 
       # Used as a job ID and also as an output directory, so we want
       # it fairly collision-resistant.
-      if donumber is None: # unusual filename, non-repository.
-        jobname_bam = "%s_tophat" % fqname
-      else:
-        jobname_bam = "%s_%s%02d_%s_tophat" % (donumber, facility, int(lanenum), current)
+      jobname_bam = "%s_tophat" % fqname
 
       out = bash_quote(fqname + ".bam")
       out_names.append(out)

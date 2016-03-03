@@ -16,6 +16,7 @@ from tempfile import TemporaryFile
 import stat
 import grp
 import gzip
+import bz2
 from contextlib import contextmanager
 import hashlib
 from subprocess import Popen, CalledProcessError, PIPE
@@ -60,6 +61,26 @@ def is_zipped(fname):
   else:
     if suff == DBCONF.gzsuffix:
       LOGGER.warn("Uncompressed file masquerading as gzipped: %s", fname)
+    return False
+
+def is_bzipped(fname):
+  '''
+  Test whether a file is bzipped or not, based on magic number with an
+  additional check on file suffix. Assumes that the fname argument
+  points directly to the file in question, and that the file is
+  readable. Returns True/False accordingly.
+  '''
+  suff = os.path.splitext(fname)[1]
+  if open(fname).read(3) == 'BZh': # bzip2 file magic number.
+
+    if suff != '.bz2':
+      LOGGER.warn("Bzipped file detected without '.bz2' suffix: %s",
+                  fname)
+
+    return True
+  else:
+    if suff == '.bz2':
+      LOGGER.warn("Uncompressed file masquerading as bzipped: %s", fname)
     return False
 
 def unzip_file(fname, dest=None, delete=True, overwrite=False):
@@ -158,6 +179,8 @@ def flexi_open(filename, *args, **kwargs):
   '''
   if is_zipped(filename):
     handle = gzip.open(filename, *args, **kwargs)
+  elif is_bzipped(filename):
+    handle = bz2.BZ2File(filename, *args, **kwargs)
   else:
     handle = open(filename, *args, **kwargs)
 
