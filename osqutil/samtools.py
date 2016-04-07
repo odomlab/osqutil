@@ -131,6 +131,8 @@ class BamToBedConverter(object):
       if flag & 0x0004:
         unmapped += 1
         continue # read is unmapped
+      if flag & 0x0800:
+        continue # supplementary alignment; discard.
       mapped += 1
       strand = '+'
       if flag & 0x0010:
