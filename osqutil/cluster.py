@@ -336,6 +336,34 @@ class RemoteJobRunner(JobRunner):
       return call_subprocess(cmd, shell=True, path=self.config.hostpath)
     return None
 
+  def find_remote_executable(self, progname, path=None):
+    '''
+    Quick (and a little dirty) approach to identifying an executable
+    file on the specified path on a remote server (defaults to the
+    default shell $PATH var).
+    '''
+    # This is a fairly simple shell script which just iterates over
+    # the elements in $PATH and returns the first hit for an
+    # executable file of the specified progname.
+    cmd = (r"""IFS=':' read -a myary <<< \$PATH && for elem in \${myary[@]};"""
+           + (r""" do if [ -x \${elem}/%s ]; then found=\${elem}/%s; break; fi; done && echo \$found"""
+              % (progname, progname)))
+
+    # Run the command directly on the server (without bsub or nohup).
+    output = self.run_command(cmd, path=path, command_builder=SimpleCommand())
+
+    # One or zero lines should be returned.
+    line = output.next()
+    if line is None:
+      return None
+
+    executable = line.strip()
+    if executable == '':
+      return None
+    
+    LOGGER.debug('Found remote executable at %s', executable)
+    return executable
+
   def remote_copy_files(self, filenames, destnames=None, same_permissions=False):
     '''
     Copy a set of files across to the remote working directory.
