@@ -77,7 +77,7 @@ def poll_reverse_tunnel():
 
   while(1):
     sock = socket(AF_INET, SOCK_STREAM)
-    res  = sock.connect_ex(('127.0.0.1', REMOTE_PORT))
+    res  = sock.connect_ex(('127.0.0.1', REMOTE_SSH_PORT))
     if res != 0: # Connection has failed.
       return
     time.sleep(60)
