@@ -360,7 +360,7 @@ class TwoWayTunnel(OneWayTunnel):
                                                self.remote_username.decode('base64'),
                                                self.remote_password.decode('base64'),
                                                self.reverse_ssh_flags,
-                                               os.path.join(self.remote_dir, os.path.basename(__file__)), forward_tunnel=False)
+                                               os.path.join(self.remote_dir, os.path.basename(__file__)) + ' --revpoll', forward_tunnel=False)
           mess = 'SSH reverse tunnel established'
           if not self.test_mode:
             syslog(LOG_INFO, mess)
