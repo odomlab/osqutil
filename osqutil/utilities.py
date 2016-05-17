@@ -541,19 +541,23 @@ class BamPostProcessor(object):
   __slots__ = ('input_fn', 'output_fn', 'cleaned_fn', 'rgadded_fn',
                'common_args', 'samplename')
 
-  def __init__(self, input_fn, output_fn, tmpdir=DBCONF.tmpdir, samplename=None):
+  def __init__(self, input_fn, output_fn, tmpdir=DBCONF.tmpdir, samplename=None, compress=True):
 
     self.input_fn    = input_fn
-    self.output_fn   = output_fn
+    self.output_fn = output_fn
     self.samplename  = samplename
 
     output_base = os.path.splitext(output_fn)[0]
     self.cleaned_fn  = "%s_cleaned.bam" % output_base
     self.rgadded_fn  = "%s_rg.bam" % output_base
-
+    self.fixmateout_fn = output_fn
+    
     # Some options are universal. Consider also adding QUIET=true, VERBOSITY=ERROR
     self.common_args = ('VALIDATION_STRINGENCY=SILENT',
                         'TMP_DIR=%s' % tmpdir)
+    # In case post processing intermediate files are expected to be uncompressed add COMPRESSION_LEVEL=0
+    if not compress:
+      self.common_args.append('COMPRESSION_LEVEL=0')
 
   def clean_sam(self):
 
