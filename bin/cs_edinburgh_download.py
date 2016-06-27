@@ -233,7 +233,7 @@ class ed_downloader(object):
         '''Downloads file with name fname'''
 
         for f in data_files:
-            acmd = "ascp -q -T -p -P %s -O %s -l %s %s@%s:%s %s" % (, self.aPport, self.aOport, self.arate, self.credentials['username'], self.ahost, fname, self.destination)        
+            acmd = "ascp -q -T -p -P %s -O %s -l %s %s@%s:%s %s" % (self.aPport, self.aOport, self.arate, self.credentials['username'], self.ahost, fname, self.destination)        
             call_subprocess(acmd, shell=True, path=self.destination) # Make sure ASPERA_SCP_PASS is available in shell. 
             fpath = os.path.join(self.destination, fname)
         return fpath
