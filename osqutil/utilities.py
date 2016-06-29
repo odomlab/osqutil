@@ -557,7 +557,7 @@ class BamPostProcessor(object):
     # In case post processing intermediate files are expected to be uncompressed add COMPRESSION_LEVEL=0
     self.compress = compress
     if not compress:
-      self.common_args.append('COMPRESSION_LEVEL=0')
+      self.common_args = self.common_args + ('COMPRESSION_LEVEL=0')
 
   def clean_sam(self):
 
