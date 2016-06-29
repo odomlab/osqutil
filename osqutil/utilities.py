@@ -550,7 +550,6 @@ class BamPostProcessor(object):
     output_base = os.path.splitext(output_fn)[0]
     self.cleaned_fn  = "%s_cleaned.bam" % output_base
     self.rgadded_fn  = "%s_rg.bam" % output_base
-    self.fixmateout_fn = output_fn
     
     # Some options are universal. Consider also adding QUIET=true, VERBOSITY=ERROR
     self.common_args = ('VALIDATION_STRINGENCY=SILENT',
@@ -597,6 +596,6 @@ class BamPostProcessor(object):
     # Run FixMateInformation
     cmd = ('picard', 'FixMateInformation',
            'INPUT=%s'  % self.rgadded_fn,
-           'OUTPUT=%s' % self.fixmateout_fn) + self.common_args
-
+           'OUTPUT=%s' % self.output_fn) + self.common_args
+      
     return cmd

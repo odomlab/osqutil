@@ -903,9 +903,15 @@ class AlignmentManager(object):
     FixMateInformation. Note that this method relies on the presence
     of a wrapper shell script named 'picard' in the path.
     '''
+    # if postprocess intermediate files will not be compressed,
+    # we need to add additional step of bam compression in the end
+    if not self.conf.compressintermediates:
+      output_fn_final = output_fn
+      output_fn = output_fn + "_uncompressed.bam"
+    
     postproc = BamPostProcessor(input_fn=input_fn, output_fn=output_fn,
                                 samplename=samplename,
-                                tmpdir=self.conf.clusterworkdir)
+                                tmpdir=self.conf.clusterworkdir, compress=self.conf.compressintermediates)
 
     # Run CleanSam
     call_subprocess(postproc.clean_sam(),
@@ -924,9 +930,16 @@ class AlignmentManager(object):
                     tmpdir=self.conf.clusterworkdir, path=self.conf.clusterpath)
     if self.cleanup:
       os.unlink(postproc.rgadded_fn)
-
-    if self.group:
-      set_file_permissions(self.group, output_fn)
+      
+    if not self.conf.compressintermediates:
+      cmd = "samtools view -b -@ %s %s > %s && rm %s" % (self.conf.num_threads, output_fn, output_fn_final, output_fn)
+      call_subprocess(cmd,
+                      tmpdir=self.conf.clusterworkdir, path=self.conf.clusterpath)
+      if self.group:
+        set_file_permissions(self.group, output_fn_final)
+    else:
+      if self.group:
+        set_file_permissions(self.group, output_fn)
 
   def merge_alignments(self, input_fns, output_fn, rcp_target=None, samplename=None, postprocess=True):
     '''
@@ -947,7 +960,7 @@ class AlignmentManager(object):
     LOGGER.info("merged '%s' into '%s'", ", ".join(input_fns), merge_fn)
 
     if postprocess:
-      LOGGER.info("running picard cleanup on '%s'", merge_fn)
+      LOGGER.info("running picard cleanup on '%s'", merge_fn)    
       self.picard_cleanup(output_fn, merge_fn, samplename)
       LOGGER.info("ran picard cleanup on '%s' creating '%s'", merge_fn, output_fn)
     
