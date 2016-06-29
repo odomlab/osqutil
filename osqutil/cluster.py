@@ -13,6 +13,9 @@ import glob
 import tempfile
 import uuid
 
+from subprocess import Popen, PIPE
+import time
+
 from pipes import quote
 from tempfile import gettempdir
 from shutil import move
@@ -693,7 +696,7 @@ class AlignmentManager(object):
   (and merging their output) on the cluster.
   '''
   __slots__ = ('conf', 'samtools_prog', 'group', 'cleanup', 'loglevel',
-               'split_read_count', 'bsub', 'merge_prog', 'logfile', 'debug')
+               'split_read_count', 'bsub', 'merge_prog', 'logfile', 'debug', 'threads', 'postprocess')
 
   def __init__(self, merge_prog=None, cleanup=False, group=None,
                split_read_count=1000000,
@@ -800,8 +803,6 @@ class AlignmentManager(object):
       cmd += " --cleanup"
     if self.group:
       cmd += " --group %s" % (self.group,)
-    if threads:
-      cmd += " --threads %s" % (self.threads,)
     if samplename:
       cmd += " --sample %s" % (samplename,)
     if self.postprocess:
@@ -1176,8 +1177,8 @@ class BwaAlignmentManager(AlignmentManager):
 
     bam_fn = "%s.bam" % make_bam_name_without_extension(files[0])
 
-    postprocess = True
-    self.queue_merge(bam_files, job_ids, bam_fn, rcp_target, samplename, postprocess=postprocess)
+    self.postprocess = True
+    self.queue_merge(bam_files, job_ids, bam_fn, rcp_target, samplename)
 
 ##########################################################################
 
@@ -1192,7 +1193,7 @@ class BwaAlignmentManager2(AlignmentManager):
       bwa_algorithm = 'aln'
     assert(bwa_algorithm in ('aln', 'mem'))
  
-    super(BwaAlignmentManager, self).__init__(*args, **kwargs)
+    super(BwaAlignmentManager2, self).__init__(*args, **kwargs)
 
     # These are now identified by passing in self.conf.clusterpath to
     # the remote command.
@@ -1441,7 +1442,7 @@ class BwaAlignmentManager2(AlignmentManager):
     for fn in files:
       if fileshost is not None:
         # Throw an error in case files host is specified but no path to the files.
-        self._get_foreign_file(fn, filehost)
+        self._get_foreign_file(fn, fileshost)
       (path, fname) = os.path.split(fn)
       local_files.append(fname)        
 
