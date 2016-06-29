@@ -1177,7 +1177,6 @@ class BwaAlignmentManager(AlignmentManager):
     bam_fn = "%s.bam" % make_bam_name_without_extension(files[0])
 
     postprocess = True
-    REALLY?
     self.queue_merge(bam_files, job_ids, bam_fn, rcp_target, samplename, postprocess=postprocess)
 
 ##########################################################################

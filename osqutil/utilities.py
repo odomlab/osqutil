@@ -539,7 +539,7 @@ def memoize(func):
 class BamPostProcessor(object):
 
   __slots__ = ('input_fn', 'output_fn', 'cleaned_fn', 'rgadded_fn',
-               'common_args', 'samplename')
+               'common_args', 'samplename', 'compress')
 
   def __init__(self, input_fn, output_fn, tmpdir=DBCONF.tmpdir, samplename=None, compress=False):
 

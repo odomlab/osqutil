@@ -57,9 +57,7 @@ if __name__ == '__main__':
                       help='Run picard based post process after bam merge.')
   
   PARSER.add_argument('--group', type=str, dest='group',
-                      help='The user group for the files.')  
-
-  cs_runBwaWithSplit_Merge.py.
+                      help='The user group for the files.')
   
   ARGS = PARSER.parse_args()
 
