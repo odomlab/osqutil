@@ -146,7 +146,7 @@ class ed_downloader(object):
         self.credentials = read_credentials(DBCONF.acredfile)
         os.environ['ASPERA_SCP_PASS'] = self.credentials['password']        
         
-    def ed_download(ifile, project):
+    def ed_download(self, ifile, project):
         '''Reads userids in ifile and downloads files for each userid'''
 
         # Set some variables for submitting the download jobs to cluster.
@@ -154,7 +154,7 @@ class ed_downloader(object):
         submitter = ClusterJobSubmitter()
 
         # Open the file containing donumbers/userids/library.codes one on each line.        
-        with open(self.ifile, 'rb') as fh:
+        with open(ifile, 'rb') as fh:
 
             # Set some variables for threaded downloading.
             # We will try to control for the number of threads by
@@ -176,12 +176,12 @@ class ed_downloader(object):
                     jobid = submitter.submit_command(cmd=cmd, mem=1000, auto_requeue=False)
                 newids.append(jobid)
                 tnr += 1
-                if tnr == self.athreads:
+                if tnr == int(self.athreads):
                     jobids = newids
                     newids = []
                     tnr = 0
 
-    def ed_get_files_by_userid(userid, project):
+    def ed_get_files_by_userid(self, userid, project):
         '''Downloads all files for the userid'''
         # For each userid in Edinburgh Genomics (i.e. in our case library.code / do-number), the files available are:
         # [userid]_R1.fastq.gz
@@ -201,7 +201,7 @@ class ed_downloader(object):
             fname = "%s_%s" % (userid, fprefix)
             
             attempts = 0
-            while ed_get_file_with_md5(fname, project) != 0:
+            while self.ed_get_file_with_md5(fname, project) != 0:
                 attempts += 1
                 if attempts == self.maxattempts:
                     # Record failed command
@@ -300,10 +300,10 @@ if __name__ == '__main__':
 
     # Process by input file containing donumbers/userids
     if ARGS.fin:
-        edd.ed_download(ifile=ARGS.fin, project=ARGS.project)
+        edd.ed_download(ARGS.fin, ARGS.project)
     # Process by donumber/userdi
     elif ARGS.library:        
-        edd.ed_get_files_by_userid(userid=ARGS.library, project=ARGS.project)
+        edd.ed_get_files_by_userid(ARGS.library, ARGS.project)
     # Process by file
     elif ARGS.fname:
         edd.ed_get_file_with_md5(fname=ARGS.fname, project=ARGS.project)

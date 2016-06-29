@@ -83,7 +83,7 @@ if __name__ == '__main__':
   # Finding cs_runBwaWithSplit_Merge.py on this PATH is okay, since
   # we're typically running on the cluster under the path defined in
   # osqutil.config
-  BSUB = BwaAlignmentManager(debug      = ARGS.debug,
+  BSUB = BwaAlignmentManager2(debug      = ARGS.debug,
                              cleanup    = ARGS.cleanup,
                              loglevel   = ARGS.loglevel,
                              split_read_count = ARGS.reads,
