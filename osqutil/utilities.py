@@ -541,7 +541,7 @@ class BamPostProcessor(object):
   __slots__ = ('input_fn', 'output_fn', 'cleaned_fn', 'rgadded_fn',
                'common_args', 'samplename')
 
-  def __init__(self, input_fn, output_fn, tmpdir=DBCONF.tmpdir, samplename=None, compress=True):
+  def __init__(self, input_fn, output_fn, tmpdir=DBCONF.tmpdir, samplename=None, compress=False):
 
     self.input_fn    = input_fn
     self.output_fn = output_fn
@@ -556,6 +556,7 @@ class BamPostProcessor(object):
     self.common_args = ('VALIDATION_STRINGENCY=SILENT',
                         'TMP_DIR=%s' % tmpdir)
     # In case post processing intermediate files are expected to be uncompressed add COMPRESSION_LEVEL=0
+    self.compress = compress
     if not compress:
       self.common_args.append('COMPRESSION_LEVEL=0')
 
@@ -596,6 +597,6 @@ class BamPostProcessor(object):
     # Run FixMateInformation
     cmd = ('picard', 'FixMateInformation',
            'INPUT=%s'  % self.rgadded_fn,
-           'OUTPUT=%s' % self.output_fn) + self.common_args
+           'OUTPUT=%s' % self.fixmateout_fn) + self.common_args
 
     return cmd

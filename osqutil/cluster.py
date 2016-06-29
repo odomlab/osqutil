@@ -10,6 +10,8 @@ import os
 import re
 import logging
 import glob
+import tempfile
+import uuid
 
 from pipes import quote
 from tempfile import gettempdir
@@ -84,6 +86,113 @@ class NohupCommand(SimpleCommand):
 
     return cmd
 
+class SbatchCommand(SimpleCommand):
+  '''
+  Class used to build sbatch-wrapped command.
+  '''
+  def build(self, cmd, mem=2000, queue=None, jobname=None,
+            auto_requeue=False, depend_jobs=None, sleep=0, 
+            mincpus=1, maxcpus=1, clusterlogdir=None, environ=None, *args, **kwargs):
+    # The environ argument allows the caller to pass in arbitrary
+    # environmental variables (e.g., JAVA_HOME) as a dict.
+    if environ is None:
+      environ = {}
+
+    # Pass the PYTHONPATH to the cluster process. This allows us to
+    # isolate e.g. a testing instance of the code from production.
+    # Note that we can't do this as easily for PATH itself because
+    # bsub itself is in a custom location on the cluster.
+    for varname in ('PYTHONPATH', 'OSQPIPE_CONFDIR'):
+      if varname in os.environ:
+        environ[varname] = os.environ[varname]
+
+    cmd = super(BsubCommand, self).build(cmd, *args, **kwargs)
+
+    # Add information about environment in front of the command.
+    envstr = " ".join([ "%s=%s" % (key, val) for key, val in environ.iteritems() ])
+    cmd = envstr + " " + cmd
+    
+    # In some cases it is beneficial to wait couple of seconds before the job is executed
+    # As the job may be executed immediately, we add little wait before the execution of the rest of the command.
+    if sleep > 0:
+      cmd = ('sleep %d && ' % sleep) + cmd
+    
+    # We will create a slurm batch script locally and set the local and foreign path for the slurm file.
+    # Note that on execution in cluster, the script will rename itself from slurmfile to jobname.sh.
+    # uuid.uuid1() creates unique string based on hostname and time.
+    ltmpdir = tempfile.gettempdir()
+    slurmfile = str(uuid.uuid1())
+    lslurmfile = os.path.join(ltmpdir, slurmfile)
+    fslurmfile = os.path.join(clusterlogdir, slurmfile)    
+
+    f = open(lslurmfile, 'wb')
+    
+    # Create sbatch bash script  
+    f.write('#!/bin/bash\n')
+    if jobname is not None:
+      f.write('#SBATCH -J %s\n' % jobname) # where darwinjob is the jobname
+    # f.write('#SBATCH -A CHANGEME\n') # which project should be charged. I think at this point this can be commented out.
+    # A safety net in case min or max nr of cores gets muddled up. An
+    # explicit error is preferred in such cases, so that we can see
+    # what to fix.
+    if mincpus > maxcpus:
+      maxcpus = mincpus
+      LOGGER.info("mincpus (%d) is greater than maxcpus (%d). Maxcpus was made equal to mincpus!" % (mincpus, maxcpus))
+    f.write('#SBATCH --nodes=%d-%d\n' % (mincpus, maxcpus) ) # how many whole nodes (cores) should be allocated
+    f.write('#SBATCH -N 1\n') # Make sure that all cores are in one node
+    f.write('#SBATCH --mail-type=NONE\n') # never receive mail
+    f.write('#SBATCH -p %s\n' % queue) # Queue where the job is sent.
+    f.write('#SBATCH --open-mode=append\n') # record information about job re-sceduling
+    if auto_requeue:
+      f.write('#SBATCH --requeue\n') # requeue job in case node dies etc.
+    else:
+      f.write('#SBATCH --no-requeue\n') # do not requeue the job    
+    f.write('#SBATCH --mem %s\n' % mem) # memory in MB
+    # f.write('#SBATCH -t 0-%s\n' % time_limit) # Note that time_limit is a string in format of hh:mm
+    f.write('#SBATCH -o %s/%%j.stdout\n' % clusterlogdir) # File to which STDOUT will be written
+    f.write('#SBATCH -e %s/%%j.stderr\n' % clusterlogdir) # File to which STDERR will be written
+    if depend_jobs is not None:
+      dependencies = '#SBATCH --dependency=aftercorr' # execute job after all corresponding jobs 
+      for djob in depend_jobs:
+        dependencies += ':%s' % djob
+      f.write('%s\n' % dependencies)
+    # Following (two) lines are not necessarily needed but suggested by University Darwin cluster for record keeping in scheduler log files.
+    f.write('numnodes=$SLURM_JOB_NUM_NODES\n')
+    f.write('numtasks=$SLURM_NTASKS\n')
+    f.write('hostname=`hostname`\n')
+    f.write('workdir=\"$SLURM_SUBMIT_DIR\"\n')
+    # This is the place where the actual command we want to execute is added to the script.
+    f.write('CMD=\"%s\"\n' % cmd)
+    # Change dir to work directory.
+    f.write('cd %s\n' % self.conf.clusterworkdir)    
+    f.write('echo -e \"Changed directory to `pwd`.\n\"\n')
+    f.write('JOBID=$SLURM_JOB_ID\n')
+    f.write('echo -e \"JobID: $JOBID\n======\"\n')
+    f.write('echo "Job start time: `date`"\n')
+    f.write('echo \"Executed in node: $hostname\"\n')
+    f.write('echo \"CPU info: `cat /proc/cpuinfo | grep name | uniq | tr -s \' \' | cut -f2 -d:`\"\n')
+    f.write('echo \"Current directory: `pwd`\"\n')
+    # f.write('echo -e \"\nnumtasks=$numtasks, numnodes=$numnodes\"\n')     
+    f.write('echo -e \"Number of cores requested: min=%d, max=%d\"\n' % (mincpus, maxcpus))    
+    f.write('echo -e \"Number of nodes received: $numnodes\"\n')
+    f.write('echo -e \"\nExecuting command:\n==================\n$CMD\n\"\n')    
+    f.write('mv %s %s/$SLURM_JOB_ID.sh\n' % (fslurmfile, clusterlogdir))
+    f.write('eval $CMD\n\n')
+    f.write('echo "Job end time: `date`"\n')
+    f.close()
+
+    # Copy slurm file to clusterlogdir in cluster head node.
+    rjr = RemoteJobRunner(transfer_wdir=clusterlogdir)
+    rjr.remote_copy_files(filenames=[lslurmfile],destnames=[slurmfile])
+    
+    # Remove slurm file locally.
+    os.remove(lslurmfile)
+    
+    # Create slurm command
+    slurmcmd = 'sbatch %s' % fslurmfile
+
+    return slurmcmd
+  
 class BsubCommand(SimpleCommand):
   '''
   Class used to build a bsub-wrapped command.
@@ -137,7 +246,8 @@ class BsubCommand(SimpleCommand):
     # explicit error is preferred in such cases, so that we can see
     # what to fix.
     if mincpus > maxcpus:
-      raise ValueError("mincpus (%d) is greater than maxcpus (%d). Surely some error?" % (mincpus, maxcpus))
+      maxcpus = mincpus
+      LOGGER.info("mincpus (%d) is greater than maxcpus (%d). Maxcpus was made equal to mincpus!" % (mincpus, maxcpus))
 
     # In case clusterlogdir has been specified, override the self.conf.clusterstdout
     # This is handy in case we want to keep the logs together with job / larger project related files.
@@ -206,16 +316,15 @@ class JobRunner(object):
   submitting to a remote LSF head node.
   '''
   __slots__ = ('test_mode', 'config', 'command_builder')
-
   def __init__(self, test_mode=False, command_builder=None, *args, **kwargs):
     self.test_mode = test_mode
     if test_mode:
       LOGGER.setLevel(logging.DEBUG)
     else:
       LOGGER.setLevel(logging.INFO)
-
+      
     self.config = Config()
-
+    
     self.command_builder = SimpleCommand() \
         if command_builder is None else command_builder
 
@@ -225,13 +334,13 @@ class JobRunner(object):
       cmd = command_builder.build(cmd, *args, **kwargs)
     else:
       cmd = self.command_builder.build(cmd, *args, **kwargs)
-
+      
     if path is None:
       path = self.config.hostpath
-
+      
     if tmpdir is None:
       tmpdir = gettempdir()
-
+      
     LOGGER.debug(cmd)
     if not self.test_mode:
       return call_subprocess(cmd, shell=True, path=path, tmpdir=tmpdir)
@@ -250,7 +359,7 @@ class JobRunner(object):
 class JobSubmitter(JobRunner):
 
   '''Class to run jobs via LSF/bsub on the local host (i.e., when running on the cluster).'''
-
+  
   def __init__(self, remote_wdir=None, *args, **kwargs):
     self.conf = Config()
     super(JobSubmitter, self).__init__(command_builder=BsubCommand(),
@@ -263,9 +372,9 @@ class JobSubmitter(JobRunner):
     BsubCommand.build(). The return value is the integer LSF job ID.
     '''
     pout = super(JobSubmitter, self).\
-        submit_command(cmd,
-                       *args, **kwargs)
-
+           submit_command(cmd,
+                          *args, **kwargs)
+    
     # FIXME this could be farmed out to utilities?
     jobid_pattern = re.compile(r"Job\s+<(\d+)>\s+is\s+submitted\s+to")
     for line in pout:
@@ -274,7 +383,7 @@ class JobSubmitter(JobRunner):
         jobid = int(matchobj.group(1))
         LOGGER.info("LSF ID of submitted job: %d", jobid)
         return jobid
-
+        
     raise ValueError("Unable to parse bsub output for job ID.")
 
 class RemoteJobRunner(JobRunner):
@@ -313,7 +422,7 @@ class RemoteJobRunner(JobRunner):
       cmd = command_builder.build(cmd, *args, **kwargs)
     else:
       cmd = self.command_builder.build(cmd, *args, **kwargs)
-
+      
     if wdir is None:
       wdir = self.remote_wdir
 
@@ -360,7 +469,7 @@ class RemoteJobRunner(JobRunner):
     executable = line.strip()
     if executable == '':
       return None
-    
+
     LOGGER.debug('Found remote executable at %s', executable)
     return executable
 
@@ -372,14 +481,14 @@ class RemoteJobRunner(JobRunner):
       destnames = filenames
     if len(filenames) != len(destnames):
       raise ValueError("If used, the length of the destnames list"
-                       + " must equal that of the filenames list.")
+                                                                          + " must equal that of the filenames list.")
     for i in range(0, len(filenames)):
       fromfn = filenames[i]
       destfn = destnames[i]
-
+      
       destfile = os.path.join(self.transfer_wdir, destfn)
       destfile = bash_quote(destfile)
-
+      
       # Currently we assume that the same login credentials work for
       # both the cluster and the data transfer host. Note that this
       # needs an appropriate ssh key to be authorised on both the
@@ -409,19 +518,19 @@ class RemoteJobRunner(JobRunner):
     # Note that we're assuming that the name extensions reflect the
     # compression status.
     destfile = os.path.join(self.remote_wdir, fname)
-
+  
 ##  Note that double-quoting here gives undesired results if the
 ##  filename contains square brackets. If problems recur with other
 ##  filenames, consider modifying bash_quote to omit the
 ##  square-bracket quoting.
 #    destfile = bash_quote(destfile)
-
+    
     # Assumes that gzip/bzip2/whatever is in the executable path on
     # the remote server.
     LOGGER.info("Uncompressing remote file %s", fname)
     cmd = " ".join(('%s -f -d' % zipcommand, quote(destfile)))
     self.run_command(cmd, command_builder=SimpleCommand())
-
+    
     # Remove the filename extension.
     return os.path.splitext(fname)[0]
 
@@ -440,7 +549,7 @@ class RemoteJobRunner(JobRunner):
     # Next, call uncompress any files which need it.
     uncomp_names = []
     for num in range(len(destnames)):
-
+      
       # We have to test the file we copied over, since we'll be
       # reading its header.
       if is_zipped(filenames[num]):
@@ -452,7 +561,7 @@ class RemoteJobRunner(JobRunner):
       uncomp_names.append(uncomp)
 
     return uncomp_names
-
+  
   def submit(self, *args, **kwargs):
     '''
     Stub method identifying this as an abstract base class. This is
@@ -465,7 +574,6 @@ class RemoteJobRunner(JobRunner):
 
 ##############################################################################
 ##############################################################################
-
 class ClusterJobSubmitter(RemoteJobRunner):
 
   '''Class to run jobs via LSF/bsub on the cluster.'''
@@ -490,18 +598,18 @@ class ClusterJobSubmitter(RemoteJobRunner):
 
     # Must call this *after* setting the remote host info.
     super(ClusterJobSubmitter, self).__init__(command_builder=BsubCommand(),
-                                              *args, **kwargs)
+                      *args, **kwargs)
 
   def submit_command(self, cmd, *args, **kwargs):
     '''
     Submit a job to run on the cluster. Uses bsub to enter jobs into
     the LSF queuing system. Extra arguments are passed to
     BsubCommand.build(). The return value is the integer LSF job ID.
-    '''
+    '''    
     pout = super(ClusterJobSubmitter, self).\
-        submit_command(cmd,
-                       path=self.conf.clusterpath,
-                       *args, **kwargs)
+           submit_command(cmd,
+                          path=self.conf.clusterpath,
+                          *args, **kwargs)
 
     jobid_pattern = re.compile(r"Job\s+<(\d+)>\s+is\s+submitted\s+to")
     if not self.test_mode:
@@ -515,13 +623,13 @@ class ClusterJobSubmitter(RemoteJobRunner):
       raise ValueError("Unable to parse bsub output for job ID.")
     else:
       return 0 # Test mode only.
-
+    
 class ClusterJobRunner(RemoteJobRunner):
-
+  
   '''Class to run jobs via simple SSH on the cluster.'''
-
+  
   def __init__(self, remote_wdir=None, *args, **kwargs):
-
+    
     self.conf        = Config()
     self.remote_host = self.conf.cluster
     self.remote_port = self.conf.clusterport
@@ -537,13 +645,12 @@ class ClusterJobRunner(RemoteJobRunner):
     except AttributeError, _err:
       LOGGER.debug("Falling back to cluster remote directory for transfer.")
       self.transfer_wdir = self.remote_wdir
-
+      
     # Must call this *after* setting the remote host info.
     super(ClusterJobRunner, self).__init__(command_builder=SimpleCommand(),
                                            *args, **kwargs)
-
+    
 ##############################################################################
-
 class DesktopJobSubmitter(RemoteJobRunner):
   '''
   Class to run jobs on an alternative alignment host (typically a
@@ -560,7 +667,7 @@ class DesktopJobSubmitter(RemoteJobRunner):
     self.remote_wdir = self.conf.althostworkdir
     self.transfer_host = self.remote_host
     self.transfer_dir  = self.remote_wdir
-
+    
     # Must call this *after* setting the remote host info.
     super(DesktopJobSubmitter, self).__init__(command_builder=NohupCommand(),
                                               *args, **kwargs)
@@ -571,10 +678,10 @@ class DesktopJobSubmitter(RemoteJobRunner):
     machine.
     '''
     return super(DesktopJobSubmitter, self).\
-        submit_command(cmd,
-                       path=self.conf.althostpath,
-                       remote_wdir=self.remote_wdir,
-                       *args, **kwargs)
+      submit_command(cmd,
+                     path=self.conf.althostpath,
+                     remote_wdir=self.remote_wdir,
+                     *args, **kwargs)
 
 ##############################################################################
 ##############################################################################
@@ -601,10 +708,13 @@ class AlignmentManager(object):
     self.logfile       = self.conf.splitbwarunlog
     self.bsub          = JobSubmitter()
     self.split_read_count   = split_read_count
-
+    self.threads       = self.conf.num_threads
+    self.postprocess   = True # defines if to run post merge bam processing.
+    
     self.cleanup       = cleanup
     self.group         = group
-    self.debug         = debug
+    self.debug         = debug    
+    
     self._configure_logging(self.__class__.__name__, LOGGER)
     LOGGER.setLevel(loglevel)
     LOGGER.debug("merge_prog set to %s", self.merge_prog)
@@ -613,15 +723,16 @@ class AlignmentManager(object):
     '''
     Configures the logs to be saved in self.logfile.
     '''
+
     if self.debug:
       logger.setLevel(logging.DEBUG) # log everything on debug level
     else:
       logger.setLevel(logging.INFO)
-
+      
     # specify the format of the log file
     logfmt = "[%%(asctime)s] %s %%(levelname)s : %%(message)s" % (name,)
     fmt = logging.Formatter(logfmt)
-
+    
     # Push stderr to logs; Note that any required StreamHandlers will
     # have been added in the child class.
     hdlr = logging.FileHandler(self.logfile)
@@ -629,19 +740,27 @@ class AlignmentManager(object):
     hdlr.setLevel(min(logger.getEffectiveLevel(), logging.WARN))
     logger.addHandler(hdlr)
 
-  def split_fq(self, fastq_fn):
+  def split_fq(self, fastq_fn, override_cleanup=False):
     '''
     Splits fastq file to self.split_read_count reads per file using
     linux command line split for speed.
+    In case compressed (gzip or bzip), the file will be uncompressed on fly.    
     '''
     LOGGER.debug("splitting fq file %s to %s per file ", fastq_fn, self.split_read_count)
 
     fastq_fn_suffix = fastq_fn + '-'
-    cmd = ("split -l %s %s %s" # split -l size file.fq prefix
-           % (self.split_read_count*4, quote(fastq_fn), quote(fastq_fn_suffix)))
+    if fastq_fn.endswith('.gz'):
+      cmd = 'gunzip -c %s | split -l %s - %s' % (quote(fastq_fn), self.split_read_count*4*int(self.threads), quote(fastq_fn_suffix) )
+      fastq_fn_suffix = fastq_fn.rstrip('.gz') + '-'
+    elif fastq_fn.endswith('.bz2'):
+      cmd = 'bzcat %s | split -l %s - %s' % (quote(fastq_fn), self.split_read_count*4*int(self.threads), quote(fastq_fn_suffix) )
+      fastq_fn_suffix = fastq_fn.rstrip('.bz2') + '-'
+    else:
+      cmd = ("split -l %s %s %s" # split -l size file.fq prefix
+             % (self.split_read_count*4, quote(fastq_fn), quote(fastq_fn_suffix)))
     call_subprocess(cmd, shell=True,
-                   tmpdir=self.conf.clusterworkdir,
-                   path=self.conf.clusterpath)
+                    tmpdir=self.conf.clusterworkdir,
+                    path=self.conf.clusterpath)
 
     # glob will try and expand [, ], ? and *; we don't actually want that.
     # Here we quote them as per the glob docs in a character class [].
@@ -652,7 +771,7 @@ class AlignmentManager(object):
       LOGGER.debug("Created fastq file: '%s'", fname)
       if self.group != None:
         set_file_permissions(self.group, fname)
-    if self.cleanup:
+    if self.cleanup and not override_cleanup:
       os.unlink(fastq_fn)
       LOGGER.info("Unlinking fq file '%s'", fastq_fn)
     return fq_files
@@ -661,6 +780,9 @@ class AlignmentManager(object):
     '''
     Submits samtools job for merging list of bam files to LSF cluster.
     '''
+
+    ## ML: thread information is available in self.threads. However,
+    
     assert( self.merge_prog is not None )
     input_files = " ".join(bam_files) # singly-bash-quoted
     LOGGER.debug("Entering queue_merge with input_files=%s", input_files)
@@ -678,18 +800,22 @@ class AlignmentManager(object):
       cmd += " --cleanup"
     if self.group:
       cmd += " --group %s" % (self.group,)
+    if threads:
+      cmd += " --threads %s" % (self.threads,)
     if samplename:
       cmd += " --sample %s" % (samplename,)
+    if self.postprocess:
+      cmd += " --postprocess"
     cmd += " %s %s" % (bash_quote(bam_fn), input_files)
 
     LOGGER.info("preparing samtools merge on '%s'", input_files)
     LOGGER.debug(cmd)
 
     jobname = bam_files[0].split("_")[0] + "bam"
-    jobid = self._submit_lsfjob(cmd, jobname, depend, mem=10000)
+    jobid = self._submit_lsfjob(cmd, jobname, depend, mem=10000) # ML: Why such a large memory request?
     LOGGER.debug("got job id '%s'", jobid)
 
-  def _submit_lsfjob(self, command, jobname, depend=None, sleep=0, mem=8000):
+  def _submit_lsfjob(self, command, jobname, depend=None, sleep=0, mem=8000, threads=1):
     '''
     Executes command in LSF cluster.
     '''
@@ -698,7 +824,7 @@ class AlignmentManager(object):
                                      path=self.conf.clusterpath,
                                      tmpdir=self.conf.clusterworkdir,
                                      queue=self.conf.clusterqueue,
-                                     sleep=sleep)
+                                     sleep=sleep, mincpus=threads)
     return '' if jobid is None else jobid
 
   def split_and_align(self, *args, **kwargs):
@@ -708,6 +834,7 @@ class AlignmentManager(object):
     of those alignments, which in turn merges the outputs to generate
     the final bam file.
     '''
+
     raise NotImplementedError()
 
   def _merge_files(self, output_fn, input_fns):
@@ -718,14 +845,14 @@ class AlignmentManager(object):
       LOGGER.warn("renaming file: %s", input_fns[0])
       move(input_fns[0], output_fn)
     else:
-      cmd = ("%s merge %s %s" # assumes sorted input bams.
-             % (self.samtools_prog,
+      cmd = ("%s merge -@ %s %s %s" # assumes sorted input bams.
+             % (self.conf.num_threads, self.samtools_prog,
                 bash_quote(output_fn),
                 " ".join([ bash_quote(x) for x in input_fns])))
       LOGGER.debug(cmd)
       pout = call_subprocess(cmd, shell=True,
-                            tmpdir=self.conf.clusterworkdir,
-                            path=self.conf.clusterpath)
+                             tmpdir=self.conf.clusterworkdir,
+                             path=self.conf.clusterpath)
       for line in pout:
         LOGGER.warn("SAMTOOLS: %s", line[:-1])
     if not os.path.isfile(output_fn):
@@ -745,12 +872,12 @@ class AlignmentManager(object):
     '''
     Copies file to target location.
     '''
-    qname = bash_quote(fname)
+    qname = bash_quote(fname)    
     cmd = "scp -p -q %s %s" % (qname, target)
     LOGGER.debug(cmd)
     pout = call_subprocess(cmd, shell=True,
-                          tmpdir=self.conf.clusterworkdir,
-                          path=self.conf.clusterpath)
+                           tmpdir=self.conf.clusterworkdir,
+                           path=self.conf.clusterpath)
     count = 0
     for line in pout:
       LOGGER.warn("SCP: %s", line[:-1])
@@ -764,8 +891,8 @@ class AlignmentManager(object):
       cmd = "ssh %s touch %s/%s.done" % (flds[0], flds[1], bash_quote(fn_base))
       LOGGER.debug(cmd)
       call_subprocess(cmd, shell=True,
-                     tmpdir=self.conf.clusterworkdir,
-                     path=self.conf.clusterpath)
+                      tmpdir=self.conf.clusterworkdir,
+                      path=self.conf.clusterpath)
     if self.cleanup:
       os.unlink(fname)
     return
@@ -785,43 +912,50 @@ class AlignmentManager(object):
                     tmpdir=self.conf.clusterworkdir, path=self.conf.clusterpath)
     if self.cleanup:
       os.unlink(input_fn)
-
+      
     # Run AddOrReplaceReadGroups
     call_subprocess(postproc.add_or_replace_read_groups(),
                     tmpdir=self.conf.clusterworkdir, path=self.conf.clusterpath)
     if self.cleanup:
       os.unlink(postproc.cleaned_fn)
-    
+
     # Run FixMateInformation
     call_subprocess(postproc.fix_mate_information(),
                     tmpdir=self.conf.clusterworkdir, path=self.conf.clusterpath)
     if self.cleanup:
       os.unlink(postproc.rgadded_fn)
-    
+
     if self.group:
       set_file_permissions(self.group, output_fn)
 
-  def merge_alignments(self, input_fns, output_fn, rcp_target=None, samplename=None):
+  def merge_alignments(self, input_fns, output_fn, rcp_target=None, samplename=None, postprocess=True):
     '''
     Method used to merge a set of bam files into a single output bam
     file.
     '''
-    merge_fn = "%s_dirty.bam" % os.path.splitext(output_fn)[0]
+    merge_fn = output_fn
+    if postprocess:
+      merge_fn = "%s_dirty.bam" % os.path.splitext(output_fn)[0]
+
+#    output_fn_local = output_fn
+#    if output_fn.startswith('/') or output_fn.startswith('~/'):
+#      (opath, ofn) = os.path.split(output_fn)
+#      output_fn_local = ofn
 
     LOGGER.info("merging '%s' into '%s'", ", ".join(input_fns), merge_fn)
     self._merge_files(merge_fn, input_fns)
     LOGGER.info("merged '%s' into '%s'", ", ".join(input_fns), merge_fn)
 
-    LOGGER.info("running picard cleanup on '%s'", merge_fn)
-    self.picard_cleanup(output_fn, merge_fn, samplename)
-    LOGGER.info("ran picard cleanup on '%s' creating '%s'", merge_fn, output_fn)
-
+    if postprocess:
+      LOGGER.info("running picard cleanup on '%s'", merge_fn)
+      self.picard_cleanup(output_fn, merge_fn, samplename)
+      LOGGER.info("ran picard cleanup on '%s' creating '%s'", merge_fn, output_fn)
+    
     if rcp_target:
       self.copy_result(rcp_target, output_fn)
       LOGGER.info("copied '%s' to '%s'", output_fn, rcp_target)
 
 ##############################################################################
-
 class BwaAlignmentManager(AlignmentManager):
   '''
   Subclass of AlignmentManager implementing the bwa-specific
@@ -1028,8 +1162,313 @@ class BwaAlignmentManager(AlignmentManager):
     (job_ids, bam_files) = self.run_bwas(genome, paired, fq_files, fq_files2)
 
     bam_fn = "%s.bam" % make_bam_name_without_extension(files[0])
+
+    postprocess = True
+    REALLY?
+    self.queue_merge(bam_files, job_ids, bam_fn, rcp_target, samplename, postprocess=postprocess)
+
+##########################################################################
+
+class BwaAlignmentManager2(AlignmentManager):
+  '''
+  Subclass of AlignmentManager implementing the bwa-specific
+  components of our primary alignment pipeline.
+  '''
+  def __init__(self, nocc=None, bwa_algorithm=None, *args, **kwargs):
+
+    if bwa_algorithm is None:
+      bwa_algorithm = 'aln'
+    assert(bwa_algorithm in ('aln', 'mem'))
+ 
+    super(BwaAlignmentManager, self).__init__(*args, **kwargs)
+
+    # These are now identified by passing in self.conf.clusterpath to
+    # the remote command.
+    self.bwa_prog      = 'bwa'
+    self.bwa_algorithm = bwa_algorithm
+
+    if nocc:
+
+      if self.bwa_algorithm == 'mem':
+        raise StandardError("The nocc argument is not supported by bwa mem. Try bwa aln instead.")
+
+      self.nocc = '-n %s' % (nocc,)
+
+    else:
+      self.nocc = ''
+    
+  def _run_pairedend_bwa_aln(self, fqname, fqname2, genome, jobtag, delay=0):
+    '''
+    Run bwa aln on paired-ended sequencing data.
+    '''
+    jobname1  = "%s_sai1" % (jobtag,)
+    jobname2  = "%s_sai2" % (jobtag,)
+    sai_file1 = "%s.sai" % fqname
+    sai_file2 = "%s.sai" % fqname2
+
+    jobname_bam = "%s_bam" % (jobtag,)
+    outbam      = bash_quote(fqname + ".bam")
+
+    # Run bwa aln
+    cmd1 = "%s aln %s %s > %s" % (self.bwa_prog, genome,
+                                  bash_quote(fqname),
+                                  bash_quote(sai_file1))
+    cmd2 = "%s aln %s %s > %s" % (self.bwa_prog, genome,
+                                  bash_quote(fqname2),
+                                  bash_quote(sai_file2))
+
+    # Run bwa sampe
+    cmd3  = ("%s sampe %s %s %s %s %s %s"
+             % (self.bwa_prog, self.nocc, genome, bash_quote(sai_file1),
+                bash_quote(sai_file2), bash_quote(fqname), bash_quote(fqname2)))
+
+    # Convert to bam
+    cmd3 += (" | %s view -b -S -u - > %s.unsorted" % (self.samtools_prog, outbam))
+
+    # Sort the bam
+    cmd3 += (" && %s sort %s.unsorted %s" % (self.samtools_prog, outbam, bash_quote(fqname)))
+
+    # Cleanup
+    cmd3 += (" && rm %s %s %s %s %s.unsorted"
+             % (bash_quote(sai_file1), bash_quote(sai_file2),
+                bash_quote(fqname), bash_quote(fqname2), outbam))
+
+    LOGGER.info("starting bwa step1 on '%s'", fqname)
+    jobid_sai1 = self._submit_lsfjob(cmd1, jobname1, sleep=delay)
+    LOGGER.debug("got job id '%s'", jobid_sai1)
+    LOGGER.info("starting bwa step1 on '%s'", fqname2)
+    jobid_sai2 = self._submit_lsfjob(cmd2, jobname2, sleep=delay)
+    LOGGER.debug("got job id '%s'", jobid_sai2)
+
+    if jobid_sai1 and jobid_sai2:
+      LOGGER.info("preparing bwa step2 on '%s'", fqname)
+      jobid_bam = self._submit_lsfjob(cmd3, jobname_bam,
+                                      (jobid_sai1, jobid_sai2), sleep=delay)
+      LOGGER.debug("got job id '%s'", jobid_bam)
+    else:
+      LOGGER.error("bjob submission for bwa step1 for '%s' or '%s' failed!",
+                   fqname, fqname2)
+
+    return(jobid_bam, outbam)
+
+  def _run_singleend_bwa_aln(self, fqname, genome, jobtag, delay=0):
+    '''
+    Run bwa aln on single-ended sequencing data.
+    '''
+    jobname_bam = "%s_bam" % (jobtag,)
+    outbam      = bash_quote(fqname + ".bam")
+
+    # Run bwa aln
+    cmd  = ("%s aln %s %s" % (self.bwa_prog, genome, bash_quote(fqname)))
+
+    # Run bwa samse
+    cmd += (" | %s samse %s %s - %s" % (self.bwa_prog, self.nocc,
+                                        genome, bash_quote(fqname)))
+    # Convert to bam
+    cmd += (" | %s view -b -S -u - > %s.unsorted" % (self.samtools_prog, outbam))
+
+    # Sort the output bam
+    cmd += (" && %s sort %s.unsorted %s" % (self.samtools_prog,
+                                            outbam, bash_quote(fqname)))
+    # Clean up
+    cmd += (" && rm %s %s.unsorted" % (bash_quote(fqname), outbam))
+        
+    LOGGER.info("starting bwa on '%s'", fqname)
+    LOGGER.debug(cmd)
+    jobid_bam = self._submit_lsfjob(cmd, jobname_bam, sleep=delay)
+    LOGGER.debug("got job id '%s'", jobid_bam)
+
+    return(jobid_bam, outbam)
+
+  def _run_bwa_mem(self, fqnames, genome, jobtag, output_fn, samplename, delay=0):
+    '''
+    Run bwa mem on single- or paired-end sequencing data.
+    '''
+
+    self.postprocess = False
+    
+    assert(len(fqnames) in (1, 2))
+
+    jobname_bam = "%s_bam" % (jobtag,)
+    outbambase  = bash_quote(fqnames[0])
+    outbam      = outbambase + ".bam"
+
+    # TODO check variables
+    # TODO how are these dealt for non-donumber libraries?
+    # set readgroup information for the file
+    (libcode, facility, lanenum, _pipeline) = parse_repository_filename(output_fn)
+    if libcode is None:
+      LOGGER.warn("Applying dummy read group information to output bam.")
+      libcode  = os.path.basename(output_fn)
+      facility = 'Unknown'
+      lanenum  = 0
+    sample = samplename if samplename is not None else libcode    
+    readgroup = "\'@RG\tID:%d\tPL:%s\tPU:%d\tLB:%s\tSM:%s\tCN:%s\'" % (int(lanenum),'illumina',int(lanenum), libcode, sample, facility)
+    quoted_fqnames = " ".join([ bash_quote(fqn) for fqn in fqnames ])
+
+    # Variables for picard tools
+    # Some options are universal. Consider also adding QUIET=true, VERBOSITY=ERROR, TMP_DIR=DBCONF.tmpdir.
+    # Though, no the picard commands below should not require write of any temporary files.
+    picard_common_args = ('VALIDATION_STRINGENCY=SILENT', 'COMPRESSION_LEVEL=0')
+    
+    # Run bwa mem
+    cmd = "%s mem -R %s -t %s %s %s" % (self.bwa_prog, readgroup, self.threads, genome, quoted_fqnames)
+
+    # Run sam to bam conversion
+    cmd += (" | %s view -b -S -u -" % (self.samtools_prog))
+    
+    # Run picard CleanSam
+    cmd += (" | picard CleanSam INPUT=/dev/stdin OUTPUT=/dev/stdout %s" % ' '.join(picard_common_args))
+
+    # Run picard FixMateInformation
+    cmd += (" | picard FixMateInformation ASSUME_SORTED=true INPUT=/dev/stdin OUTPUT=/dev/stdout %s" % ' '.join(picard_common_args))
+
+    # Run samtools sort
+    cmd += (" | %s sort - %s" % (self.samtools_prog, outbambase))
+        
+    LOGGER.info("Starting bwa mem on fastq files: %s", quoted_fqnames)
+    LOGGER.debug(cmd)
+    jobid_bam = self._submit_lsfjob(cmd, jobname_bam, sleep=delay, mem=8000, threads=self.threads)
+    LOGGER.debug("got job id '%s'", jobid_bam)
+
+    return(jobid_bam, outbam)
+
+  def run_bwas(self, genome, paired, fq_files, fq_files2, output_fn, samplename):
+    '''
+    Submits bwa alignment jobs for list of fq files to LSF cluster.
+    '''
+    job_ids = []
+    out_names = []
+    current = 0
+    # splits the fq_file by underscore and returns first element which
+    # in current name
+    for fqname in fq_files:
+      donumber = fqname.split("_")[0]
+      jobtag   = "%s_%s" % (donumber, current)
+
+      # Older bwa aln algorithm.
+      if self.bwa_algorithm == 'aln':
+
+        if paired:
+
+          (jobid, outbam) = self._run_pairedend_bwa_aln(fqname, fq_files2[current],
+                                                        genome, jobtag, current)
+        else:
+        
+          (jobid, outbam) = self._run_singleend_bwa_aln(fqname,
+                                                        genome, jobtag, current)
+
+      # Newer bwa mem algorithm.
+      elif self.bwa_algorithm == 'mem':
+
+        fqnames = [ fqname ]
+        if paired:
+          fqnames.append(fq_files2[current])
+          
+        (jobid, outbam) = self._run_bwa_mem(fqnames, genome, jobtag, current, output_fn, samplename)
+        
+      else:
+        raise ValueError("BWA algorithm not recognised: %s" % self.bwa_algorithm)
+
+      job_ids.append(jobid)
+      out_names.append(outbam)
+      current += 1
+
+    return (job_ids, out_names)
+
+  def _get_foreign_file(self, fn, host, attempts = 1, sleeptime = 2):
+    '''Download file located in host'''
+
+    # NOTE: We may still need to double-quote spaces the destination
+    # passed to scp. Double-quoting brackets ([]) does not work, though.
+
+    (path, fname) = os.path.split(fn)
+    cmd = 'rsync -a -e \"ssh -o StrictHostKeyChecking=no\" %s@%s:%s %s' % (self.conf.clusteruser, host, bash_quote(fn), bash_quote(fname) )
+
+    start_time = time.time()
+    while attempts > 0:
+      subproc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=True)
+      (stdout, stderr) = subproc.communicate()
+      retcode = subproc.wait()
+      if stdout is not None:
+        sys.stdout.write(stdout)
+      if stderr is not None:
+        sys.stderr.write(stderr)
+      if retcode != 0:
+        attempts -= 1
+        if attempts <= 0:
+          break
+        LOGGER.warning(\
+                       'Transfer failed with error code: %s\nTrying again (max %d times)',
+                       stderr, attempts)
+        time.sleep(sleeptime)
+      else:
+        break
+        
+    if retcode !=0:
+      raise StandardError("ERROR. Failed to transfer file. Command was:\n   %s\n"
+                  % (" ".join(cmd),) )
+    
+    time_diff = time.time() - start_time
+    LOGGER.info("%s transferred in %d seconds." % (fname, time_diff) )
+    
+  def split_and_align(self, files, genome, samplename, rcp_target=None, lcp_target=None, keep_original=False, fileshost=None, postprocess=True):
+    '''
+    Method used to launch the initial file splitting and bwa
+    alignments. This class also submits a job dependent on the outputs
+    of those alignments, which in turn merges the outputs to generate
+    the final bam file.
+    '''
+    #
+    # fileshost = None - host where the fastq files are located
+    # keep_original = False - keep the original files
+    #
+
+    # Transfer files in.
+    local_files = []
+    for fn in files:
+      if fileshost is not None:
+        # Throw an error in case files host is specified but no path to the files.
+        self._get_foreign_file(fn, filehost)
+      (path, fname) = os.path.split(fn)
+      local_files.append(fname)        
+
+    # split the file(s)
+    assert( self.merge_prog is not None )
+    fq_files = self.split_fq(local_files[0], override_cleanup=keep_original)
+    paired = False
+    if len(local_files) == 2:
+      fq_files2 = self.split_fq(local_files[1], override_cleanup=keep_original)
+      paired = True
+    elif len(local_files) == 1:
+      fq_files2 = None
+    else:
+      LOGGER.error("Too many files specified.")
+      sys.exit("Unexpected number of files passed to script.")
+
+    # Construct output_fn
+    bam_fn = "%s.bam" % make_bam_name_without_extension(local_files[0])
+    if lcp_target is not None:
+      if lcp_target.endswith('.bam'):        
+        output_fn = os.path.basename(lcp_target)
+      else:
+        output_fn = os.path.join(lcp_target, bam_fn)
+      bam_fn = output_fn
+    else:
+      if rcp_target is not None:
+        if rcp_target.endswith('.bam'):
+          output_fn = os.path.basename(rcp_target.split(':').pop())
+      else:
+        output_fn = make_bam_name_without_extension(local_files[0])
+
+    # Run bwa mapping jobs for each (pair of) file(s)
+    (job_ids, bam_files) = self.run_bwas(genome, paired, fq_files, fq_files2, output_fn, samplename)
+
+    # Join the files together
     self.queue_merge(bam_files, job_ids, bam_fn, rcp_target, samplename)
 
+##########################################################################
+    
 class TophatAlignmentManager(AlignmentManager):
   '''
   Subclass of AlignmentManager implementing the tophat2-specific
