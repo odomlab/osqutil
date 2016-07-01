@@ -711,7 +711,7 @@ class AlignmentManager(object):
     self.logfile       = self.conf.splitbwarunlog
     self.bsub          = JobSubmitter()
     self.split_read_count   = split_read_count
-    self.threads       = self.conf.num_threads
+    self.threads       = int(self.conf.num_threads)
     self.postprocess   = True # defines if to run post merge bam processing.
     
     self.cleanup       = cleanup
@@ -753,11 +753,11 @@ class AlignmentManager(object):
 
     fastq_fn_suffix = fastq_fn + '-'
     if fastq_fn.endswith('.gz'):
-      cmd = 'gunzip -c %s | split -l %s - %s' % (quote(fastq_fn), self.split_read_count*4*int(self.threads), quote(fastq_fn_suffix) )
       fastq_fn_suffix = fastq_fn.rstrip('.gz') + '-'
+      cmd = 'gunzip -c %s | split -l %s - %s' % (quote(fastq_fn), self.split_read_count*4*self.threads, quote(fastq_fn_suffix) )
     elif fastq_fn.endswith('.bz2'):
-      cmd = 'bzcat %s | split -l %s - %s' % (quote(fastq_fn), self.split_read_count*4*int(self.threads), quote(fastq_fn_suffix) )
       fastq_fn_suffix = fastq_fn.rstrip('.bz2') + '-'
+      cmd = 'bzcat %s | split -l %s - %s' % (quote(fastq_fn), self.split_read_count*4*self.threads, quote(fastq_fn_suffix) )
     else:
       cmd = ("split -l %s %s %s" # split -l size file.fq prefix
              % (self.split_read_count*4, quote(fastq_fn), quote(fastq_fn_suffix)))
@@ -1324,20 +1324,27 @@ class BwaAlignmentManager2(AlignmentManager):
     # Though, no the picard commands below should not require write of any temporary files.
     picard_common_args = ('VALIDATION_STRINGENCY=SILENT', 'COMPRESSION_LEVEL=0')
     
+    # Create required named pipes
+    p1 = "%s_p1" % fqnames[0]
+    p2 = "%s_p2" % fqnames[0]
+    p3 = "%s_p3" % fqnames[0]
+
+    cmd = "mknod %s p && mknod %s p && mknod %s p && sleep 1" % (p1, p2, p3)
+    
     # Run bwa mem
-    cmd = "%s mem -R %s -t %s %s %s" % (self.bwa_prog, readgroup, self.threads, genome, quoted_fqnames)
+    cmd += " && npiper \"%s mem -R %s -t %d %s %s" % (self.bwa_prog, readgroup, self.threads, genome, quoted_fqnames)
 
     # Run sam to bam conversion
-    cmd += (" | %s view -b -S -u -" % (self.samtools_prog))
+    cmd += (" | %s view -b -S -u - > %s\"" % (self.samtools_prog, p1))
     
     # Run picard CleanSam
-    cmd += (" | picard CleanSam INPUT=/dev/stdin OUTPUT=/dev/stdout %s" % ' '.join(picard_common_args))
+    cmd += (" \"picard CleanSam INPUT=%s OUTPUT=%s %s\"" % (p1, p2, ' '.join(picard_common_args)))
 
     # Run picard FixMateInformation
-    cmd += (" | picard FixMateInformation ASSUME_SORTED=true INPUT=/dev/stdin OUTPUT=/dev/stdout %s" % ' '.join(picard_common_args))
+    cmd += (" \"picard FixMateInformation ASSUME_SORTED=true INPUT=%s OUTPUT=%s %s\"" % (p2, p3, ' '.join(picard_common_args)))
 
     # Run samtools sort
-    cmd += (" | %s sort - %s" % (self.samtools_prog, outbambase))
+    cmd += (" \"%s sort %s %s\"" % (self.samtools_prog, p3, outbambase))
         
     LOGGER.info("Starting bwa mem on fastq files: %s", quoted_fqnames)
     LOGGER.debug(cmd)
@@ -1378,7 +1385,7 @@ class BwaAlignmentManager2(AlignmentManager):
         if paired:
           fqnames.append(fq_files2[current])
           
-        (jobid, outbam) = self._run_bwa_mem(fqnames, genome, jobtag, current, output_fn, samplename)
+        (jobid, outbam) = self._run_bwa_mem(fqnames, genome, jobtag, output_fn, samplename)
         
       else:
         raise ValueError("BWA algorithm not recognised: %s" % self.bwa_algorithm)
