@@ -1571,10 +1571,14 @@ class BwaAlignmentManager2(AlignmentManager):
     else:
       if rcp_target is not None:
         if rcp_target.endswith('.bam'):
-          output_fn = os.path.basename(rcp_target.split(':').pop())
+          output_fn = os.path.join(os.path.basename(rcp_target.split(':').pop()), bam_fn)
+        else:
+          output_fn = os.path.join(rcp_target.split(':').pop(), bam_fn)
       else:
+        LOGGER.error("Neither lcp (%s) nor rcp (%s) has been defined!", lcp_target, rcp_target)
         output_fn = make_bam_name_without_extension(local_files[0])
-
+    LOGGER.info("Saving alignment output in %s", output_fn)
+        
     # Run bwa mapping jobs for each (pair of) file(s)
     (job_ids, bam_files) = self.run_bwas(genome, paired, fq_files, fq_files2, output_fn, samplename)
 
