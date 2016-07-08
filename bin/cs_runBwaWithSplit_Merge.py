@@ -50,6 +50,9 @@ if __name__ == '__main__':
   PARSER.add_argument('--rcp', type=str, dest='rcp',
                       help='Remote file copy (rcp) target.')
 
+  PARSER.add_argument('--debug', dest='debug', action='store_true',
+                      help='Switch the debugging info on.')
+  
   PARSER.add_argument('--cleanup', dest='cleanup', action='store_true',
                       help='Delete all temporary files.')
 

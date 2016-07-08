@@ -4,9 +4,9 @@
 
 """ Run BWA using Split to improve speed """
 __author__ = "Margus Lukk"
-__date__ = "05 Mar 2012"
-__version__ = "0.2"
-__credits__ = "Adjusted from cs_runMaqWithSplit written by Gordon Brown."
+__date__ = "20 Jun 2016"
+__version__ = "0.3"
+__credits__ = "Originally created using structure from cs_runMaqWithSplit which was written by Gordon Brown. Re-structured by Tim Rayner in 2013-2014. Re-written by Margus Lukk in 2016."
 
 # Known bugs: 
 # 
@@ -24,7 +24,7 @@ from osqutil.setup_logs import configure_logging
 from logging import INFO, WARNING
 LOGGER = configure_logging(level=INFO)
     
-from osqutil.cluster import BwaAlignmentManager
+from osqutil.cluster import BwaAlignmentManager2
 
 ##################  M A I N   P R O G R A M  ######################
 
@@ -52,11 +52,14 @@ if __name__ == '__main__':
                       help='The level of logging.')
 
   PARSER.add_argument('--reads', type=int, dest='reads', default=1000000,
-                      help='The number of reads in a split.')
+                      help='The number of reads per CPU core.')
 
   PARSER.add_argument('--rcp', type=str, dest='rcp',
                       help='Remote file copy (rcp) target.')
 
+  PARSER.add_argument('--lcp', type=str, dest='lcp', default=None,
+                      help='Local file copy (lcp) target.')
+  
   PARSER.add_argument('--group', type=str, dest='group',
                       help='The user group for the files.')
 
@@ -66,6 +69,9 @@ if __name__ == '__main__':
   PARSER.add_argument('--n_occ', dest='nocc', type=str,
                       help='Number of occurrences of non-unique reads to keep.')
 
+  PARSER.add_argument('--fileshost', dest='fileshost', type=str,
+                      help='Host where the files should be downloaded from.')
+
   PARSER.add_argument('-d', '--debug', dest='debug', action='store_true',
                       help='Turn on debugging output.')
 
@@ -74,7 +80,7 @@ if __name__ == '__main__':
   # Finding cs_runBwaWithSplit_Merge.py on this PATH is okay, since
   # we're typically running on the cluster under the path defined in
   # osqutil.config
-  BSUB = BwaAlignmentManager(debug      = ARGS.debug,
+  BSUB = BwaAlignmentManager2(debug      = ARGS.debug,
                              cleanup    = ARGS.cleanup,
                              loglevel   = ARGS.loglevel,
                              split_read_count = ARGS.reads,
@@ -87,6 +93,6 @@ if __name__ == '__main__':
   BSUB.split_and_align(files      = ARGS.files,
                        genome     = ARGS.genome,
                        samplename = ARGS.sample,
-                       rcp_target = ARGS.rcp)
-
-  
+                       rcp_target = ARGS.rcp,
+                       lcp_target = ARGS.lcp,
+                       fileshost  = ARGS.fileshost)
