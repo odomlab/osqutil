@@ -22,6 +22,7 @@ import hashlib
 from subprocess import Popen, CalledProcessError, PIPE
 from distutils import spawn
 import threading
+import socket
 from .config import Config
 from .setup_logs import configure_logging
 from functools import wraps
@@ -561,6 +562,42 @@ def write_to_remote_file(txt, remotefname, user, host, append=False):
     # ssh: Could not resolve hostname ...: Temporary failure in name resolution
     
   return retcode
+
+def get_my_ip():
+    return socket.gethostbyname(socket.getfqdn())
+
+def get_my_hostname():
+    return socket.gethostname()
+
+def run_in_communication_host(argv):
+  '''Runs list passed from sys.argv in communication host specified in configuration file over ssh.'''
+  ## Example: place run_in_communication_host(sys.argv) in the start of any program/script that needs to be run
+  ## in communication host.
+  
+  # Pass running the command if we are already in communication host
+  my_name = get_my_hostname()
+  if my_name == DBCONF.communicationhost:
+    return None
+
+  if argv[0].startswith('./'):
+    argv[0] = argv[0].lstrip('./')
+
+  LOGGER.warn("Running '%s' over ssh in %s", argv[0], DBCONF.communicationhost)
+
+  cmd = ' '.join(argv)
+  # if cmd.startswith('./'):
+  #  cmd = cmd.lstrip('./')
+
+  ssh_cmd = "ssh -o StrictHostKeyChecking=no %s@%s %s" % (DBCONF.user, DBCONF.communicationhost, cmd)
+  # NB! Not using call_subprocess here as we just want to pass on the result written to stdout and stderr.
+  # call_subprocess(ssh_cmd, shell=True, path=self.conf.hostpath)
+  subproc = Popen(ssh_cmd, stdout=PIPE, stderr=PIPE, shell=True)
+  (stdout, stderr) = subproc.communicate()
+  retcode = subproc.wait()
+  sys.stdout.write(stdout)
+  sys.stderr.write(stderr)    
+  
+  sys.exit(retcode)
 
 class BamPostProcessor(object):
 
