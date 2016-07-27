@@ -6,7 +6,7 @@
 __author__ = "Margus Lukk"
 __date__ = "20 Jun 2016"
 __version__ = "0.3"
-__credits__ = "Originally created using structure from cs_runMaqWithSplit which was written by Gordon Brown. Re-structured by Tim Rayner in 2013-2014. Re-written by Margus Lukk in 2016."
+__credits__ = "Originally adjusted from cs_runMaqWithSplit written by Gordon Brown. Re-written in 2016"
 
 # Known bugs: 
 # 
@@ -52,7 +52,7 @@ if __name__ == '__main__':
                       help='The level of logging.')
 
   PARSER.add_argument('--reads', type=int, dest='reads', default=1000000,
-                      help='The number of reads per CPU core.')
+                      help='The number of reads in a split.')
 
   PARSER.add_argument('--rcp', type=str, dest='rcp',
                       help='Remote file copy (rcp) target.')
@@ -66,12 +66,18 @@ if __name__ == '__main__':
   PARSER.add_argument('--cleanup', dest='cleanup', action='store_true',
                       help='Delete all temporary files.')
 
+  PARSER.add_argument('--no-split', dest='nosplit', action='store_true',
+                      help='Do not split input fastq for distributed parallel alignment.', default=False)
+  
   PARSER.add_argument('--n_occ', dest='nocc', type=str,
                       help='Number of occurrences of non-unique reads to keep.')
 
   PARSER.add_argument('--fileshost', dest='fileshost', type=str,
                       help='Host where the files should be downloaded from.')
 
+  PARSER.add_argument('--keep_source_files', dest='keep_original', action='store_true',
+                      help='Kee the original fastq files.')
+  
   PARSER.add_argument('-d', '--debug', dest='debug', action='store_true',
                       help='Turn on debugging output.')
 
@@ -87,6 +93,7 @@ if __name__ == '__main__':
                              group      = ARGS.group,
                              nocc       = ARGS.nocc,
                              bwa_algorithm = ARGS.algorithm,
+                             nosplit      = ARGS.nosplit,
                              merge_prog = spawn.find_executable('cs_runBwaWithSplit_Merge.py',
                                                                 path=os.environ['PATH']))
 
@@ -95,4 +102,5 @@ if __name__ == '__main__':
                        samplename = ARGS.sample,
                        rcp_target = ARGS.rcp,
                        lcp_target = ARGS.lcp,
+                       keep_original = ARGS.keep_original,
                        fileshost  = ARGS.fileshost)

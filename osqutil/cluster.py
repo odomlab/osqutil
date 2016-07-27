@@ -717,7 +717,7 @@ class AlignmentManager(object):
     self.bsub          = JobSubmitter()
     self.split_read_count   = split_read_count
     self.threads       = int(self.conf.num_threads)
-    self.postprocess   = True # defines if to run post merge bam processing.
+    self.sortthreads   = int(self.conf.num_threads_sort)
     
     self.cleanup       = cleanup
     self.group         = group
@@ -812,8 +812,6 @@ class AlignmentManager(object):
       cmd += " --group %s" % (self.group,)
     if samplename:
       cmd += " --sample %s" % (samplename,)
-    if self.postprocess:
-      cmd += " --postprocess"
     cmd += " %s %s" % (bash_quote(bam_fn), input_files)
 
     LOGGER.info("preparing samtools merge on '%s'", input_files)
@@ -845,24 +843,49 @@ class AlignmentManager(object):
 
     raise NotImplementedError()
 
-  def _merge_files(self, output_fn, input_fns):
+  def _merge_files(self, output_fn, input_fns, samplename=samplename):
     '''
     Merges list of bam files.
     '''
     if len(input_fns) == 1:
-      LOGGER.warn("renaming file: %s", input_fns[0])
+      if input_fns
+      LOGGER.warn("Moving file: %s to %s", input_fns[0], output_fn)
       move(input_fns[0], output_fn)
     else:
-      cmd = ("%s merge -@ %s %s %s" # assumes sorted input bams.
-             % (self.samtools_prog, self.conf.num_threads,
-                bash_quote(output_fn),
-                " ".join([ bash_quote(x) for x in input_fns])))
+      
+      m1 = "%s_m1" % bash_quote(output_fn)
+      m2 = "%s_m2" % bash_quote(output_fn)
+      cmd = "mknod %s p && mknod %s p" % (m1, m2)
+      # NB! samtools merge does not like naped pipe as output file. Hence the extra step of writing to stdout and cating to named pipe.
+      ncmd = ("%s merge -u - %s %s > %s\n" # assumes sorted input bams.
+              % (self.samtools_prog, " ".join([ bash_quote(x) for x in input_fns]), m1))
+      # Prepare read group information
+      (libcode, facility, lanenum, _pipeline) = parse_repository_filename(output_fn)
+      if libcode is None:
+        LOGGER.warn("Applying dummy read group information to output bam.")
+        libcode  = os.path.basename(self.output_fn)
+        facility = 'Unknown'
+        lanenum  = 0
+      sample = samplename if self.samplename is not None else libcode
+      # Command for adding read groups
+      ncmd += "picard AddOrReplaceReadGroups VALIDATION_STRINGENCY=SILENT COMPRESSION_LEVEL=0 INPUT=%s OUTPUT=%s RGLB=%s RGSM=%s RGCN=%s RGPU=%d RGPL=illumina\n" % (m1, m2, libcode, sample, facility, int(lanenum))
+      # Command for compressing the file
+      ncmd += "samtools view -b -@ %d %s > %s\n" % (self.threads, m2, bash_quote(output_fn))
+      
+      LOGGER.debug(ncmd)
+      nfname = os.path.join(self.conf.clusterworkdir, "%s.nfile" % output_fn)
+      ret = write_to_remote_file(ncmd, nfname, self.conf.clusteruser, self.conf.cluster)
+      if ret > 0:
+        LOGGER.error("Failed to create %s:%s" % (self.conf.cluster, nfname))
+        sys.exit(1)
+      cmd += " && npiper -i %s && rm %s %s" % (m1, nfname, m1, m2)
+      
       LOGGER.debug(cmd)
       pout = call_subprocess(cmd, shell=True,
                              tmpdir=self.conf.clusterworkdir,
                              path=self.conf.clusterpath)
-      for line in pout:
-        LOGGER.warn("SAMTOOLS: %s", line[:-1])
+    for line in pout:
+      LOGGER.warn("SAMTOOLS: %s", line[:-1])
     if not os.path.isfile(output_fn):
       LOGGER.error("expected output file '%s' cannot be found.", output_fn)
       sys.exit("File access error.")
@@ -964,237 +987,29 @@ class AlignmentManager(object):
 #      output_fn_local = ofn
 
     LOGGER.info("merging '%s' into '%s'", ", ".join(input_fns), merge_fn)
-    self._merge_files(merge_fn, input_fns)
+    self._merge_files(merge_fn, input_fns, samplename)
     LOGGER.info("merged '%s' into '%s'", ", ".join(input_fns), merge_fn)
 
-    if postprocess:
-      LOGGER.info("running picard cleanup on '%s'", merge_fn)    
-      self.picard_cleanup(output_fn, merge_fn, samplename)
-      LOGGER.info("ran picard cleanup on '%s' creating '%s'", merge_fn, output_fn)
+    # NB! Following coded out lines are deprecated code not needed any more.
+    # The lines used to run picard CleanSam and FixMateInformation now taken care of earlier in the pipeline;
+    # and picard AddReadGroup now part of merge_files.
+    # 
+    # LOGGER.info("running picard cleanup on '%s'", merge_fn)    
+    # self.picard_cleanup(output_fn, merge_fn, samplename)
+    # LOGGER.info("ran picard cleanup on '%s' creating '%s'", merge_fn, output_fn)
     
     if rcp_target:
       self.copy_result(rcp_target, output_fn)
       LOGGER.info("copied '%s' to '%s'", output_fn, rcp_target)
 
 ##############################################################################
+
 class BwaAlignmentManager(AlignmentManager):
   '''
   Subclass of AlignmentManager implementing the bwa-specific
   components of our primary alignment pipeline.
   '''
-  def __init__(self, nocc=None, bwa_algorithm=None, *args, **kwargs):
-
-    if bwa_algorithm is None:
-      bwa_algorithm = 'aln'
-    assert(bwa_algorithm in ('aln', 'mem'))
-
-    super(BwaAlignmentManager, self).__init__(*args, **kwargs)
-
-    # These are now identified by passing in self.conf.clusterpath to
-    # the remote command.
-    self.bwa_prog      = 'bwa'
-    self.bwa_algorithm = bwa_algorithm
-
-    if nocc:
-
-      if self.bwa_algorithm == 'mem':
-        raise StandardError("The nocc argument is not supported by bwa mem. Try bwa aln instead.")
-
-      self.nocc = '-n %s' % (nocc,)
-
-    else:
-      self.nocc = ''
-    
-  def _run_pairedend_bwa_aln(self, fqname, fqname2, genome, jobtag, delay=0):
-    '''
-    Run bwa aln on paired-ended sequencing data.
-    '''
-    jobname1  = "%s_sai1" % (jobtag,)
-    jobname2  = "%s_sai2" % (jobtag,)
-    sai_file1 = "%s.sai" % fqname
-    sai_file2 = "%s.sai" % fqname2
-
-    jobname_bam = "%s_bam" % (jobtag,)
-    outbam      = bash_quote(fqname + ".bam")
-
-    # Run bwa aln
-    cmd1 = "%s aln %s %s > %s" % (self.bwa_prog, genome,
-                                  bash_quote(fqname),
-                                  bash_quote(sai_file1))
-    cmd2 = "%s aln %s %s > %s" % (self.bwa_prog, genome,
-                                  bash_quote(fqname2),
-                                  bash_quote(sai_file2))
-
-    # Run bwa sampe
-    cmd3  = ("%s sampe %s %s %s %s %s %s"
-             % (self.bwa_prog, self.nocc, genome, bash_quote(sai_file1),
-                bash_quote(sai_file2), bash_quote(fqname), bash_quote(fqname2)))
-
-    # Convert to bam
-    cmd3 += (" | %s view -b -S -u - > %s.unsorted" % (self.samtools_prog, outbam))
-
-    # Sort the bam
-    cmd3 += (" && %s sort %s.unsorted %s" % (self.samtools_prog, outbam, bash_quote(fqname)))
-
-    # Cleanup
-    cmd3 += (" && rm %s %s %s %s %s.unsorted"
-             % (bash_quote(sai_file1), bash_quote(sai_file2),
-                bash_quote(fqname), bash_quote(fqname2), outbam))
-
-    LOGGER.info("starting bwa step1 on '%s'", fqname)
-    jobid_sai1 = self._submit_lsfjob(cmd1, jobname1, sleep=delay)
-    LOGGER.debug("got job id '%s'", jobid_sai1)
-    LOGGER.info("starting bwa step1 on '%s'", fqname2)
-    jobid_sai2 = self._submit_lsfjob(cmd2, jobname2, sleep=delay)
-    LOGGER.debug("got job id '%s'", jobid_sai2)
-
-    if jobid_sai1 and jobid_sai2:
-      LOGGER.info("preparing bwa step2 on '%s'", fqname)
-      jobid_bam = self._submit_lsfjob(cmd3, jobname_bam,
-                                      (jobid_sai1, jobid_sai2), sleep=delay)
-      LOGGER.debug("got job id '%s'", jobid_bam)
-    else:
-      LOGGER.error("bjob submission for bwa step1 for '%s' or '%s' failed!",
-                   fqname, fqname2)
-
-    return(jobid_bam, outbam)
-
-  def _run_singleend_bwa_aln(self, fqname, genome, jobtag, delay=0):
-    '''
-    Run bwa aln on single-ended sequencing data.
-    '''
-    jobname_bam = "%s_bam" % (jobtag,)
-    outbam      = bash_quote(fqname + ".bam")
-
-    # Run bwa aln
-    cmd  = ("%s aln %s %s" % (self.bwa_prog, genome, bash_quote(fqname)))
-
-    # Run bwa samse
-    cmd += (" | %s samse %s %s - %s" % (self.bwa_prog, self.nocc,
-                                        genome, bash_quote(fqname)))
-    # Convert to bam
-    cmd += (" | %s view -b -S -u - > %s.unsorted" % (self.samtools_prog, outbam))
-
-    # Sort the output bam
-    cmd += (" && %s sort %s.unsorted %s" % (self.samtools_prog,
-                                            outbam, bash_quote(fqname)))
-    # Clean up
-    cmd += (" && rm %s %s.unsorted" % (bash_quote(fqname), outbam))
-        
-    LOGGER.info("starting bwa on '%s'", fqname)
-    LOGGER.debug(cmd)
-    jobid_bam = self._submit_lsfjob(cmd, jobname_bam, sleep=delay)
-    LOGGER.debug("got job id '%s'", jobid_bam)
-
-    return(jobid_bam, outbam)
-
-  def _run_bwa_mem(self, fqnames, genome, jobtag, delay=0):
-    '''
-    Run bwa mem on single- or paired-end sequencing data.
-    '''
-    assert(len(fqnames) in (1, 2))
-
-    jobname_bam = "%s_bam" % (jobtag,)
-    outbambase  = bash_quote(fqnames[0])
-    outbam      = outbambase + ".bam"
-
-    # Run bwa mem
-    quoted_fqnames = " ".join([ bash_quote(fqn) for fqn in fqnames ])
-    cmd  = ("%s mem %s %s" % (self.bwa_prog, genome, quoted_fqnames))
-
-    # Convert to bam
-    cmd += (" | %s view -b -S -u - > %s.unsorted" % (self.samtools_prog, outbam))
-
-    # Sort the output bam
-    cmd += (" && %s sort %s.unsorted %s" % (self.samtools_prog,
-                                            outbam, outbambase))
-    # Clean up
-    cmd += (" && rm %s %s.unsorted" % (quoted_fqnames, outbam))
-        
-    LOGGER.info("Starting bwa mem on fastq files: %s", quoted_fqnames)
-    LOGGER.debug(cmd)
-    jobid_bam = self._submit_lsfjob(cmd, jobname_bam, sleep=delay)
-    LOGGER.debug("got job id '%s'", jobid_bam)
-
-    return(jobid_bam, outbam)
-
-  def run_bwas(self, genome, paired, fq_files, fq_files2):
-    '''
-    Submits bwa alignment jobs for list of fq files to LSF cluster.
-    '''
-    job_ids = []
-    out_names = []
-    current = 0
-    # splits the fq_file by underscore and returns first element which
-    # in current name
-    for fqname in fq_files:
-      donumber = fqname.split("_")[0]
-      jobtag   = "%s_%s" % (donumber, current)
-
-      # Older bwa aln algorithm.
-      if self.bwa_algorithm == 'aln':
-
-        if paired:
-
-          (jobid, outbam) = self._run_pairedend_bwa_aln(fqname, fq_files2[current],
-                                                        genome, jobtag, current)
-        else:
-        
-          (jobid, outbam) = self._run_singleend_bwa_aln(fqname,
-                                                        genome, jobtag, current)
-
-      # Newer bwa mem algorithm.
-      elif self.bwa_algorithm == 'mem':
-
-        fqnames = [ fqname ]
-        if paired:
-          fqnames.append(fq_files2[current])
-          
-        (jobid, outbam) = self._run_bwa_mem(fqnames, genome, jobtag, current)
-        
-      else:
-        raise ValueError("BWA algorithm not recognised: %s" % self.bwa_algorithm)
-
-      job_ids.append(jobid)
-      out_names.append(outbam)
-      current += 1
-
-    return (job_ids, out_names)
-
-  def split_and_align(self, files, genome, samplename, rcp_target=None):
-    '''
-    Method used to launch the initial file splitting and bwa
-    alignments. This class also submits a job dependent on the outputs
-    of those alignments, which in turn merges the outputs to generate
-    the final bam file.
-    '''
-    assert( self.merge_prog is not None )
-    fq_files = self.split_fq(files[0])
-    paired = False
-    if len(files) == 2:
-      fq_files2 = self.split_fq(files[1])
-      paired = True
-    elif len(files) == 1:
-      fq_files2 = None
-    else:
-      LOGGER.error("Too many files specified.")
-      sys.exit("Unexpected number of files passed to script.")
-
-    (job_ids, bam_files) = self.run_bwas(genome, paired, fq_files, fq_files2)
-
-    bam_fn = "%s.bam" % make_bam_name_without_extension(files[0])
-
-    self.postprocess = True
-    self.queue_merge(bam_files, job_ids, bam_fn, rcp_target, samplename)
-
-##########################################################################
-
-class BwaAlignmentManager2(AlignmentManager):
-  '''
-  Subclass of AlignmentManager implementing the bwa-specific
-  components of our primary alignment pipeline.
-  '''
-  def __init__(self, nocc=None, bwa_algorithm=None, *args, **kwargs):
+  def __init__(self, nocc=None, bwa_algorithm=None, nosplit=False, *args, **kwargs):
 
     if bwa_algorithm is None:
       bwa_algorithm = 'aln'
@@ -1207,10 +1022,11 @@ class BwaAlignmentManager2(AlignmentManager):
     self.bwa_prog      = 'bwa'
     self.bwa_algorithm = bwa_algorithm
 
-    self.postprocess = False
-
+    self.split = True # By default, files are split for alignment with aligned files merged in the end.
+    if nosplit:
+      self.split = False
+      
     if nocc:
-
       if self.bwa_algorithm == 'mem':
         raise StandardError("The nocc argument is not supported by bwa mem. Try bwa aln instead.")
 
@@ -1219,7 +1035,7 @@ class BwaAlignmentManager2(AlignmentManager):
     else:
       self.nocc = ''
     
-  def _run_pairedend_bwa_aln(self, fqname, fqname2, genome, jobtag, output_fn, samplename, delay=0):
+  def _run_pairedend_bwa_aln(self, fqname, fqname2, genome, jobtag, output_fn, samplename, delay=0, compress_output=False):
     '''
     Run bwa aln on paired-ended sequencing data.
     '''
@@ -1271,10 +1087,13 @@ class BwaAlignmentManager2(AlignmentManager):
     # Run samtools sort
     # depending on number of threads, determine how much memory to allocate per thread.
     mem_string = ""
-    mem = int(round(((int(self.conf.clustermem)-1000)/self.threads),-2)) # leave 1000MB for other use.
-    if mem > 200:
-      mem_string = " -m %dM" % mem      
-    ncommands += ("%s sort -l 0 -@ %d%s %s %s\n" % (self.samtools_prog, self.threads, mem_string, p3, outbambase))
+    mem = int(round(((int(self.conf.clustermem)-1000)/self.sortthreads),-2)) # leave 1000MB for other use.
+    # if mem > 200:
+    mem_string = " -m %dM" % mem      
+    if compress_output:
+      ncommands += ("%s sort -@ %d%s %s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
+    else:
+      ncommands += ("%s sort -l 0 -@ %d%s %s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
 
     
     # write ncommands to nfname
@@ -1305,7 +1124,7 @@ class BwaAlignmentManager2(AlignmentManager):
 
     return(jobid_bam, outbam)
 
-  def _run_singleend_bwa_aln(self, fqname, genome, jobtag, output_fn, samplename, delay=0):
+  def _run_singleend_bwa_aln(self, fqname, genome, jobtag, output_fn, samplename, delay=0, compress_output=False):
     '''
     Run bwa aln on single-ended sequencing data.
     '''
@@ -1344,12 +1163,15 @@ class BwaAlignmentManager2(AlignmentManager):
     
     # depending on RAM available, we can allocate more for sorting
     mem_string = ""
-    mem = int(round(((int(self.conf.clustermem)-10000)/self.threads),-2)) # leave 10000MB for mapping and other use.
+    mem = int(round(((int(self.conf.clustermem)-10000)/self.sortthreads),-2)) # leave 10000MB for mapping and other use.
     # if less than 500MB of ram left, do not bother specifying
-    if mem > 500:
-      mem_string = "-m %dM " % mem
+    # if mem > 500:
+    mem_string = "-m %dM " % mem
     # Run samtools sort
-    ncommands += ("%s sort -l 0 %s%s %s\n" % (self.samtools_prog, mem_string, p3, outbambase))
+    if compress_output:
+      ncommands += ("%s sort -@ %d %s%s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
+    else:
+      ncommands += ("%s sort -l 0 -@ %d %s%s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
     
     # write ncommands to nfname
     nfname = os.path.join(self.conf.clusterworkdir, "%s.nfile" % fqname)
@@ -1380,7 +1202,7 @@ class BwaAlignmentManager2(AlignmentManager):
 
     return "\'@RG\tID:%d\tPL:%s\tPU:%d\tLB:%s\tSM:%s\tCN:%s\'" % (int(lanenum),'illumina',int(lanenum), libcode, sample, facility)
   
-  def _run_bwa_mem(self, fqnames, genome, jobtag, output_fn, samplename, delay=0):
+  def _run_bwa_mem(self, fqnames, genome, jobtag, output_fn, samplename, delay=0, compress_output=False):
     '''
     Run bwa mem on single- or paired-end sequencing data.
     '''
@@ -1391,7 +1213,11 @@ class BwaAlignmentManager2(AlignmentManager):
     outbambase  = bash_quote(fqnames[0])
     outbam      = outbambase + ".bam"
 
-    readgroup = self._make_readgroup_string(output_fn, samplename)
+    readgroup = ""
+    # Check if readgroup information should be added by bwa
+    if self.split is False:
+      readgroup = "-R %s" % self._make_readgroup_string(output_fn, samplename)
+      
     quoted_fqnames = " ".join([ bash_quote(fqn) for fqn in fqnames ])
 
     # Variables for picard tools
@@ -1407,7 +1233,7 @@ class BwaAlignmentManager2(AlignmentManager):
     cmd = "mknod %s p && mknod %s p && mknod %s p && sleep 1" % (p1, p2, p3)
     
     # Run bwa mem
-    ncommands = "%s mem -R %s -t %d %s %s" % (self.bwa_prog, readgroup, self.threads, genome, quoted_fqnames)
+    ncommands = "%s mem %s -t %d %s %s" % (self.bwa_prog, readgroup, self.threads, genome, quoted_fqnames)
 
     # Run sam to bam conversion
     ncommands += (" | %s view -b -S -u - > %s\n" % (self.samtools_prog, p1))
@@ -1418,15 +1244,18 @@ class BwaAlignmentManager2(AlignmentManager):
     # Run picard FixMateInformation
     ncommands += ("picard FixMateInformation ASSUME_SORTED=true INPUT=%s OUTPUT=%s %s\n" % (p2, p3, ' '.join(picard_common_args)))
 
-    # depending on about of RAM available, we can allocate more for sorting
+    # depending on RAM available, allocate more per thread
     mem_string = ""
-    mem = int(round(((int(self.conf.clustermem)-10000)/self.threads),-2)) # leave 10000MB for mapping and other use.
-    # if less than 500MB of ram left, do not bother specifying
-    if mem > 500:
-      mem_string = "-m %dM " % mem
+    mem = int(round(((int(self.conf.clustermem)-10000)/self.sortthreads),-2)) # leave 10000MB for mapping and other use.
+    # if less than 500MB of ram per thread, do not bother specifying
+    # if mem < 500:
+    mem_string = "-m %dM " % mem
     
     # Run samtools sort
-    ncommands += ("%s sort -l 0 %s%s %s\n" % (self.samtools_prog, mem_string, p3, outbambase))
+    if compress_output:
+      ncommands += ("%s sort -@ %d %s%s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
+    else:
+      ncommands += ("%s sort -l 0 -@ %d %s%s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
 
     # write ncommands to nfname
     nfname = os.path.join(self.conf.clusterworkdir, "%s.nfile" % fqnames[0])
@@ -1454,6 +1283,14 @@ class BwaAlignmentManager2(AlignmentManager):
     current = 0
     # splits the fq_file by underscore and returns first element which
     # in current name
+
+    # Note that by default the bam file compression occurs in merge step.
+    # However, if input fastq is not split and output bam is expected to be normal compressed bam, we need to compress
+    # here as there won't be any merging/compressing in the end.
+    compress_output=False
+    if len(fq_files)==1:
+      compress_output=True
+    
     for fqname in fq_files:
       donumber = fqname.split("_")[0]
       jobtag   = "%s_%s" % (donumber, current)
@@ -1464,11 +1301,11 @@ class BwaAlignmentManager2(AlignmentManager):
         if paired:
 
           (jobid, outbam) = self._run_pairedend_bwa_aln(fqname, fq_files2[current],
-                                                        genome, jobtag, output_fn, samplename, current)
+                                                        genome, jobtag, output_fn, samplename, current, compress_output=compress_output)
         else:
         
           (jobid, outbam) = self._run_singleend_bwa_aln(fqname,
-                                                        genome, jobtag, output_fn, samplename, current)
+                                                        genome, jobtag, output_fn, samplename, current, compress_output=compress_output)
 
       # Newer bwa mem algorithm.
       elif self.bwa_algorithm == 'mem':
@@ -1477,7 +1314,7 @@ class BwaAlignmentManager2(AlignmentManager):
         if paired:
           fqnames.append(fq_files2[current])
           
-        (jobid, outbam) = self._run_bwa_mem(fqnames, genome, jobtag, output_fn, samplename)
+        (jobid, outbam) = self._run_bwa_mem(fqnames, genome, jobtag, output_fn, samplename, compress_output)
         
       else:
         raise ValueError("BWA algorithm not recognised: %s" % self.bwa_algorithm)
@@ -1535,7 +1372,7 @@ class BwaAlignmentManager2(AlignmentManager):
     '''
     #
     # fileshost - host where the target fastq files are located. If none, the files are expected to be local and accessible cluster wide.
-    # keep_original = False - keep the original files
+    # keep_original = False - keep original files
     #
 
     # Transfer files in.
@@ -1547,19 +1384,25 @@ class BwaAlignmentManager2(AlignmentManager):
       (path, fname) = os.path.split(fn)
       local_files.append(fname)
 
-    # split the file(s)
-    assert( self.merge_prog is not None )
-    fq_files = self.split_fq(local_files[0])
-    paired = False
+    # Split file(s)
+    if self.split:      
+      assert( self.merge_prog is not None )
+      fq_files = self.split_fq(local_files[0])
+    else:
+      fq_files = [local_files[0]]
     if len(local_files) == 2:
-      fq_files2 = self.split_fq(local_files[1])
+      if self.split:
+        fq_files2 = self.split_fq(local_files[1])
+      else:
+        fq_files2 = [local_files[1]]
       paired = True
     elif len(local_files) == 1:
-      fq_files2 = None
+        fq_files2 = None
+        paired = False
     else:
       LOGGER.error("Too many files specified.")
       sys.exit("Unexpected number of files passed to script.")
-
+        
     # Construct output_fn
     bam_fn = "%s.bam" % make_bam_name_without_extension(local_files[0])
     if lcp_target is not None:
@@ -1577,13 +1420,14 @@ class BwaAlignmentManager2(AlignmentManager):
       else:
         LOGGER.error("Neither lcp (%s) nor rcp (%s) has been defined!", lcp_target, rcp_target)
         output_fn = make_bam_name_without_extension(local_files[0])
-    LOGGER.info("Saving alignment output in %s", output_fn)
+    LOGGER.info("Saving mapping output to %s", output_fn)
         
     # Run bwa mapping jobs for each (pair of) file(s)
     (job_ids, bam_files) = self.run_bwas(genome, paired, fq_files, fq_files2, output_fn, samplename)
 
-    # Join the files together
+    # Note that 
     self.queue_merge(bam_files, job_ids, bam_fn, rcp_target, samplename)
+
 
 ##########################################################################
     
