@@ -1374,7 +1374,6 @@ class BwaAlignmentManager(AlignmentManager):
     '''
     #
     # fileshost - host where the target fastq files are located. If none, the files are expected to be local and accessible cluster wide.
-    # keep_original = False - keep original files
     #
 
     # Transfer files in.
