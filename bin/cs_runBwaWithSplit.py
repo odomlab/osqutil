@@ -74,9 +74,6 @@ if __name__ == '__main__':
 
   PARSER.add_argument('--fileshost', dest='fileshost', type=str,
                       help='Host where the files should be downloaded from.')
-
-  PARSER.add_argument('--keep_source_files', dest='keep_original', action='store_true',
-                      help='Kee the original fastq files.')
   
   PARSER.add_argument('-d', '--debug', dest='debug', action='store_true',
                       help='Turn on debugging output.')
@@ -102,5 +99,4 @@ if __name__ == '__main__':
                        samplename = ARGS.sample,
                        rcp_target = ARGS.rcp,
                        lcp_target = ARGS.lcp,
-                       keep_original = ARGS.keep_original,
                        fileshost  = ARGS.fileshost)
