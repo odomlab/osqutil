@@ -818,7 +818,7 @@ class AlignmentManager(object):
     LOGGER.debug(cmd)
 
     jobname = bam_files[0].split("_")[0] + "bam"
-    jobid = self._submit_lsfjob(cmd, jobname, depend, mem=10000) # ML: Why such a large memory request?
+    jobid = self._submit_lsfjob(cmd, jobname, depend, mem=10000, threads=self.threads) # ML: Why such a large memory request?
     LOGGER.debug("got job id '%s'", jobid)
 
   def _submit_lsfjob(self, command, jobname, depend=None, sleep=0, mem=8000, threads=1):
