@@ -848,7 +848,6 @@ class AlignmentManager(object):
     Merges list of bam files.
     '''
     if len(input_fns) == 1:
-      if input_fns
       LOGGER.warn("Moving file: %s to %s", input_fns[0], output_fn)
       move(input_fns[0], output_fn)
     else:
