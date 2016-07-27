@@ -24,7 +24,7 @@ from osqutil.setup_logs import configure_logging
 from logging import INFO, WARNING
 LOGGER = configure_logging(level=INFO)
     
-from osqutil.cluster import BwaAlignmentManager2
+from osqutil.cluster import BwaAlignmentManager
 
 ##################  M A I N   P R O G R A M  ######################
 
