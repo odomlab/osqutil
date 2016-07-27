@@ -701,7 +701,7 @@ class AlignmentManager(object):
   (and merging their output) on the cluster.
   '''
   __slots__ = ('conf', 'samtools_prog', 'group', 'cleanup', 'loglevel',
-               'split_read_count', 'bsub', 'merge_prog', 'logfile', 'debug', 'threads', 'postprocess')
+               'split_read_count', 'bsub', 'merge_prog', 'logfile', 'debug', 'threads', 'sortthreads','postprocess')
 
   def __init__(self, merge_prog=None, cleanup=False, group=None,
                split_read_count=1000000,
@@ -843,7 +843,7 @@ class AlignmentManager(object):
 
     raise NotImplementedError()
 
-  def _merge_files(self, output_fn, input_fns, samplename=samplename):
+  def _merge_files(self, output_fn, input_fns, samplename=None):
     '''
     Merges list of bam files.
     '''
@@ -856,16 +856,19 @@ class AlignmentManager(object):
       m2 = "%s_m2" % bash_quote(output_fn)
       cmd = "mknod %s p && mknod %s p" % (m1, m2)
       # NB! samtools merge does not like naped pipe as output file. Hence the extra step of writing to stdout and cating to named pipe.
-      ncmd = ("%s merge -u - %s %s > %s\n" # assumes sorted input bams.
+      ncmd = ("%s merge -u - %s > %s\n" # assumes sorted input bams.
               % (self.samtools_prog, " ".join([ bash_quote(x) for x in input_fns]), m1))
       # Prepare read group information
       (libcode, facility, lanenum, _pipeline) = parse_repository_filename(output_fn)
       if libcode is None:
         LOGGER.warn("Applying dummy read group information to output bam.")
-        libcode  = os.path.basename(self.output_fn)
+        libcode  = os.path.basename(output_fn)
         facility = 'Unknown'
         lanenum  = 0
-      sample = samplename if self.samplename is not None else libcode
+      if samplename is not None:
+        sample = samplename
+      else:
+        samplename = libcode
       # Command for adding read groups
       ncmd += "picard AddOrReplaceReadGroups VALIDATION_STRINGENCY=SILENT COMPRESSION_LEVEL=0 INPUT=%s OUTPUT=%s RGLB=%s RGSM=%s RGCN=%s RGPU=%d RGPL=illumina\n" % (m1, m2, libcode, sample, facility, int(lanenum))
       # Command for compressing the file
@@ -877,7 +880,7 @@ class AlignmentManager(object):
       if ret > 0:
         LOGGER.error("Failed to create %s:%s" % (self.conf.cluster, nfname))
         sys.exit(1)
-      cmd += " && npiper -i %s && rm %s %s" % (m1, nfname, m1, m2)
+      cmd += " && npiper -i %s && rm %s %s" % (nfname, m1, m2)
       
       LOGGER.debug(cmd)
       pout = call_subprocess(cmd, shell=True,
@@ -1014,7 +1017,7 @@ class BwaAlignmentManager(AlignmentManager):
       bwa_algorithm = 'aln'
     assert(bwa_algorithm in ('aln', 'mem'))
  
-    super(BwaAlignmentManager2, self).__init__(*args, **kwargs)
+    super(BwaAlignmentManager, self).__init__(*args, **kwargs)
 
     # These are now identified by passing in self.conf.clusterpath to
     # the remote command.
