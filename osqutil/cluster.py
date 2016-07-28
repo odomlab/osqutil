@@ -818,7 +818,8 @@ class AlignmentManager(object):
     LOGGER.debug(cmd)
 
     jobname = bam_files[0].split("_")[0] + "bam"
-    jobid = self._submit_lsfjob(cmd, jobname, depend, mem=10000, threads=self.threads) # ML: Why such a large memory request?
+
+    jobid = self._submit_lsfjob(cmd, jobname, depend, mem=8000, threads=self.threads) # Merge does not require much memory but as many cores as possible for compression is good!
     LOGGER.debug("got job id '%s'", jobid)
 
   def _submit_lsfjob(self, command, jobname, depend=None, sleep=0, mem=8000, threads=1):
@@ -980,9 +981,9 @@ class AlignmentManager(object):
     file.
     '''
     merge_fn = output_fn
-    if postprocess:
-      merge_fn = "%s_dirty.bam" % os.path.splitext(output_fn)[0]
 
+#    if postprocess:
+#      merge_fn = "%s_dirty.bam" % os.path.splitext(output_fn)[0]
 #    output_fn_local = output_fn
 #    if output_fn.startswith('/') or output_fn.startswith('~/'):
 #      (opath, ofn) = os.path.split(output_fn)
@@ -1037,7 +1038,7 @@ class BwaAlignmentManager(AlignmentManager):
     else:
       self.nocc = ''
     
-  def _run_pairedend_bwa_aln(self, fqname, fqname2, genome, jobtag, output_fn, samplename, delay=0, compress_output=False):
+  def _run_pairedend_bwa_aln(self, fqname, fqname2, genome, jobtag, output_fn, samplename, delay=0):
     '''
     Run bwa aln on paired-ended sequencing data.
     '''
@@ -1050,15 +1051,20 @@ class BwaAlignmentManager(AlignmentManager):
     outbambase  = bash_quote(fqname)
     outbam      = outbambase + ".bam"
 
+    readgroup = ""
+    # Check if readgroup information should be added by bwa
+    if self.split is False:
+      readgroup = "-R %s" % self._make_readgroup_string(output_fn, samplename)
+      outbam     = output_fn
+      outbambase = outbam.rstrip('.bam')
+
     # Run bwa aln
-    cmd1 = "%s aln -t %d %s %s > %s" % (self.bwa_prog, self.threads, genome,
+    cmd1 = "%s aln -t %d %s %s %s > %s" % (self.bwa_prog, self.threads, readgroup, genome,
                                   bash_quote(fqname),
                                   bash_quote(sai_file1))
-    cmd2 = "%s aln -t %d %s %s > %s" % (self.bwa_prog, self.threads, genome,
+    cmd2 = "%s aln -t %d %s %s %s > %s" % (self.bwa_prog, self.threads, readgroup, genome,
                                   bash_quote(fqname2),
                                   bash_quote(sai_file2))
-
-    readgroup = self._make_readgroup_string(output_fn, samplename)
 
     # Variables for picard tools
     # Some options are universal. Consider also adding QUIET=true, VERBOSITY=ERROR, TMP_DIR=DBCONF.tmpdir.
@@ -1089,10 +1095,11 @@ class BwaAlignmentManager(AlignmentManager):
     # Run samtools sort
     # depending on number of threads, determine how much memory to allocate per thread.
     mem_string = ""
-    mem = int(round(((int(self.conf.clustermem)-1000)/self.sortthreads),-2)) # leave 1000MB for other use.
-    # if mem > 200:
-    mem_string = " -m %dM" % mem      
-    if compress_output:
+    mem = int(round((int(self.conf.clustersortmem)/self.sortthreads),-2))
+    if mem > 300:
+      mem_string = " -m %dM" % mem      
+    # If no split, compress output
+    if not self.split:
       ncommands += ("%s sort -@ %d%s %s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
     else:
       ncommands += ("%s sort -l 0 -@ %d%s %s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
@@ -1126,7 +1133,7 @@ class BwaAlignmentManager(AlignmentManager):
 
     return(jobid_bam, outbam)
 
-  def _run_singleend_bwa_aln(self, fqname, genome, jobtag, output_fn, samplename, delay=0, compress_output=False):
+  def _run_singleend_bwa_aln(self, fqname, genome, jobtag, output_fn, samplename, delay=0):
     '''
     Run bwa aln on single-ended sequencing data.
     '''
@@ -1134,7 +1141,14 @@ class BwaAlignmentManager(AlignmentManager):
     outbambase  = bash_quote(fqname)
     outbam      = outbambase + ".bam"
 
-    readgroup = self._make_readgroup_string(output_fn, samplename)
+    readgroup = ""
+    # Check if readgroup information should be added by bwa
+    if self.split is False:
+      readgroup = "-R %s" % self._make_readgroup_string(output_fn, samplename)
+      outbam     = output_fn
+      outbambase = outbam.rstrip('.bam')
+
+
 
     # Variables for picard tools
     # Some options are universal. Consider also adding QUIET=true, VERBOSITY=ERROR, TMP_DIR=DBCONF.tmpdir.
@@ -1149,7 +1163,7 @@ class BwaAlignmentManager(AlignmentManager):
     cmd = "mknod %s p && mknod %s p && mknod %s p && sleep 1" % (p1, p2, p3)
     
     # Run bwa aln
-    ncommands = ("%s aln -t %d %s %s" % (self.bwa_prog, self.threads, genome, bash_quote(fqname)))
+    ncommands = ("%s aln -t %d %s %s %s" % (self.bwa_prog, self.threads, readgroup, genome, bash_quote(fqname)))
 
     # Run bwa samse
     ncommands += (" | %s samse %s %s - %s" % (self.bwa_prog, self.nocc,
@@ -1165,12 +1179,13 @@ class BwaAlignmentManager(AlignmentManager):
     
     # depending on RAM available, we can allocate more for sorting
     mem_string = ""
-    mem = int(round(((int(self.conf.clustermem)-10000)/self.sortthreads),-2)) # leave 10000MB for mapping and other use.
-    # if less than 500MB of ram left, do not bother specifying
-    # if mem > 500:
-    mem_string = "-m %dM " % mem
+    mem = int(round((int(self.conf.clustersortmem)/self.sortthreads),-2))
+    # if less than 300MB of ram left, do not bother specifying
+    if mem > 300:
+      mem_string = "-m %dM " % mem
     # Run samtools sort
-    if compress_output:
+    # If no split, compress output
+    if not self.split:
       ncommands += ("%s sort -@ %d %s%s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
     else:
       ncommands += ("%s sort -l 0 -@ %d %s%s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
@@ -1204,7 +1219,7 @@ class BwaAlignmentManager(AlignmentManager):
 
     return "\'@RG\tID:%d\tPL:%s\tPU:%d\tLB:%s\tSM:%s\tCN:%s\'" % (int(lanenum),'illumina',int(lanenum), libcode, sample, facility)
   
-  def _run_bwa_mem(self, fqnames, genome, jobtag, output_fn, samplename, delay=0, compress_output=False):
+  def _run_bwa_mem(self, fqnames, genome, jobtag, output_fn, samplename, delay=0):
     '''
     Run bwa mem on single- or paired-end sequencing data.
     '''
@@ -1219,6 +1234,8 @@ class BwaAlignmentManager(AlignmentManager):
     # Check if readgroup information should be added by bwa
     if self.split is False:
       readgroup = "-R %s" % self._make_readgroup_string(output_fn, samplename)
+      outbam     = output_fn
+      outbambase = outbam.rstrip('.bam')
       
     quoted_fqnames = " ".join([ bash_quote(fqn) for fqn in fqnames ])
 
@@ -1248,19 +1265,20 @@ class BwaAlignmentManager(AlignmentManager):
 
     # depending on RAM available, allocate more per thread
     mem_string = ""
-    mem = int(round(((int(self.conf.clustermem)-10000)/self.sortthreads),-2)) # leave 10000MB for mapping and other use.
-    # if less than 500MB of ram per thread, do not bother specifying
-    # if mem < 500:
-    mem_string = "-m %dM " % mem
+    mem = int(round((int(self.conf.clustersortmem)/self.sortthreads),-2))
+    # if less than 300MB of ram per thread, do not bother specifying
+    if mem > 300:
+      mem_string = "-m %dM " % mem
     
     # Run samtools sort
-    if compress_output:
+    # If files have not been split, compress output
+    if not self.split:
       ncommands += ("%s sort -@ %d %s%s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
     else:
       ncommands += ("%s sort -l 0 -@ %d %s%s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
 
     # write ncommands to nfname
-    nfname = os.path.join(self.conf.clusterworkdir, "%s.nfile" % fqnames[0])
+    nfname = os.path.join(self.conf.clusterworkdir, "%s.nfile" % fqnames[0])    
     ret = write_to_remote_file(ncommands, nfname, self.conf.clusteruser, self.conf.cluster)
     if ret > 0:
       LOGGER.error("Failed to create %s:%s" % (self.conf.cluster, nfname))
@@ -1286,13 +1304,6 @@ class BwaAlignmentManager(AlignmentManager):
     # splits the fq_file by underscore and returns first element which
     # in current name
 
-    # Note that by default the bam file compression occurs in merge step.
-    # However, if input fastq is not split and output bam is expected to be normal compressed bam, we need to compress
-    # here as there won't be any merging/compressing in the end.
-    compress_output=False
-    if len(fq_files)==1:
-      compress_output=True
-    
     for fqname in fq_files:
       donumber = fqname.split("_")[0]
       jobtag   = "%s_%s" % (donumber, current)
@@ -1303,11 +1314,11 @@ class BwaAlignmentManager(AlignmentManager):
         if paired:
 
           (jobid, outbam) = self._run_pairedend_bwa_aln(fqname, fq_files2[current],
-                                                        genome, jobtag, output_fn, samplename, current, compress_output=compress_output)
+                                                        genome, jobtag, output_fn, samplename, current)
         else:
         
           (jobid, outbam) = self._run_singleend_bwa_aln(fqname,
-                                                        genome, jobtag, output_fn, samplename, current, compress_output=compress_output)
+                                                        genome, jobtag, output_fn, samplename, current)
 
       # Newer bwa mem algorithm.
       elif self.bwa_algorithm == 'mem':
@@ -1316,7 +1327,7 @@ class BwaAlignmentManager(AlignmentManager):
         if paired:
           fqnames.append(fq_files2[current])
           
-        (jobid, outbam) = self._run_bwa_mem(fqnames, genome, jobtag, output_fn, samplename, compress_output)
+        (jobid, outbam) = self._run_bwa_mem(fqnames, genome, jobtag, output_fn, samplename)
         
       else:
         raise ValueError("BWA algorithm not recognised: %s" % self.bwa_algorithm)
@@ -1419,15 +1430,22 @@ class BwaAlignmentManager(AlignmentManager):
         else:
           output_fn = os.path.join(rcp_target.split(':').pop(), bam_fn)
       else:
-        LOGGER.error("Neither lcp (%s) nor rcp (%s) has been defined!", lcp_target, rcp_target)
+        LOGGER.warn("Neither lcp (%s) nor rcp (%s) has been defined. Leaving %s in cluster.", lcp_target, rcp_target, bam_fn)
         output_fn = make_bam_name_without_extension(local_files[0])
     LOGGER.info("Saving mapping output to %s", output_fn)
-        
+
+    # In case only one file, run_bwas should create bam with its final name.
+    if len(fq_files) == 1:
+      output_fn = bam_fn
+      LOGGER.warning("No splits detected. Setting output file to %s", bam_fn)
+      self.split=False
+
     # Run bwa mapping jobs for each (pair of) file(s)
     (job_ids, bam_files) = self.run_bwas(genome, paired, fq_files, fq_files2, output_fn, samplename)
 
-    # Note that 
-    self.queue_merge(bam_files, job_ids, bam_fn, rcp_target, samplename)
+    # Merge if there is more than 1 file to merge.
+    if self.split:
+      self.queue_merge(bam_files, job_ids, bam_fn, rcp_target, samplename)
 
 
 ##########################################################################
