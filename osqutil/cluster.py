@@ -96,6 +96,7 @@ class SbatchCommand(SimpleCommand):
   '''
   Class used to build sbatch-wrapped command.
   '''
+
   def build(self, cmd, mem=2000, queue=None, jobname=None,
             auto_requeue=False, depend_jobs=None, sleep=0, 
             mincpus=1, maxcpus=1, clusterlogdir=None, environ=None, *args, **kwargs):
@@ -370,8 +371,16 @@ class JobSubmitter(JobRunner):
   
   def __init__(self, remote_wdir=None, *args, **kwargs):
     self.conf = Config()
-    super(JobSubmitter, self).__init__(command_builder=BsubCommand(),
-                                       *args, **kwargs)
+    
+    if self.conf.clustertype == 'SLURM':
+      super(JobSubmitter, self).__init__(command_builder=SbatchCommand(),
+                                         *args, **kwargs)
+    elif self.conf.clustertype == 'LSF':
+      super(JobSubmitter, self).__init__(command_builder=BsubCommand(),
+                                         *args, **kwargs)
+    else:
+      LOGGER.error("Unknown cluster type '%s'. Exiting.", self.conf.clustertype)
+      sys.exit(1)
 
   def submit_command(self, cmd, *args, **kwargs):
     '''
@@ -596,8 +605,9 @@ class ClusterJobSubmitter(RemoteJobRunner):
     try:
       self.transfer_host = self.conf.transferhost
     except AttributeError, _err:
-      LOGGER.debug("Falling back to cluster host for transfer.")
-      self.transfer_host = self.remote_host
+      # LOGGER.debug("Falling back to cluster host for transfer.")
+      # self.transfer_host = self.remote_host
+      self.transfer_host = None
     try:
       self.transfer_wdir = self.conf.transferdir
     except AttributeError, _err:
@@ -646,8 +656,9 @@ class ClusterJobRunner(RemoteJobRunner):
     try:
       self.transfer_host = self.conf.transferhost
     except AttributeError, _err:
-      LOGGER.debug("Falling back to cluster host for transfer.")
-      self.transfer_host = self.remote_host
+      # LOGGER.debug("Falling back to cluster host for transfer.")
+      # self.transfer_host = self.remote_host
+      self.transfer_host = None
     try:
       self.transfer_wdir = self.conf.transferdir
     except AttributeError, _err:
@@ -881,7 +892,7 @@ class AlignmentManager(object):
       if ret > 0:
         LOGGER.error("Failed to create %s:%s" % (self.conf.cluster, nfname))
         sys.exit(1)
-      cmd += " && npiper -i %s && rm %s %s" % (nfname, m1, m2)
+      cmd += " && npiper -i %s && rm %s %s %s" % (nfname, m1, m2, nfname)
       
       LOGGER.debug(cmd)
       pout = call_subprocess(cmd, shell=True,
@@ -1104,7 +1115,6 @@ class BwaAlignmentManager(AlignmentManager):
     else:
       ncommands += ("%s sort -l 0 -@ %d%s %s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
 
-    
     # write ncommands to nfname
     nfname = os.path.join(self.conf.clusterworkdir, "%s.nfile" % fqname)
     ret = write_to_remote_file(ncommands, nfname, self.conf.clusteruser, self.conf.cluster)
@@ -1345,7 +1355,11 @@ class BwaAlignmentManager(AlignmentManager):
     # passed to scp. Double-quoting brackets ([]) does not work, though.
 
     (path, fname) = os.path.split(fn)
-    cmd = "rsync -a -e \"ssh -o StrictHostKeyChecking=no\" %s@%s:%s %s" % (self.conf.clusteruser, host, bash_quote(fn), bash_quote(fname) )
+    # If cluster data transfer host has been set transfer via transfer host, otherwise transfer directly
+    if self.transferhost is not None:
+      cmd = "ssh %s@%s \"rsync -a -e \\\"ssh -o StrictHostKeyChecking=no\\\" %s@%s:%s %s\"" % (self.conf.clusteruser, self.transferhost, self.conf.clusteruser, host, bash_quote(fn), os.path.join(self.conf.clusterworkdir, bash_quote(fname)) )
+    else:
+      cmd = "rsync -a -e \"ssh -o StrictHostKeyChecking=no\" %s@%s:%s %s" % (self.conf.clusteruser, host, bash_quote(fn), bash_quote(fname) )
 
     LOGGER.info("Downloading %s" % (fname))
     
