@@ -898,8 +898,8 @@ class AlignmentManager(object):
       pout = call_subprocess(cmd, shell=True,
                              tmpdir=self.conf.clusterworkdir,
                              path=self.conf.clusterpath)
-    for line in pout:
-      LOGGER.warn("SAMTOOLS: %s", line[:-1])
+      for line in pout:
+        LOGGER.warn("SAMTOOLS: %s", line[:-1])
     if not os.path.isfile(output_fn):
       LOGGER.error("expected output file '%s' cannot be found.", output_fn)
       sys.exit("File access error.")
