@@ -84,6 +84,108 @@ class NohupCommand(SimpleCommand):
 
     return cmd
 
+class SbatchCommand(SimpleCommand):
+  '''
+  Class used to build sbatch-wrapped command.
+  '''
+
+  def build(self, cmd, mem=2000, queue=None, jobname=None,
+            auto_requeue=False, depend_jobs=None, sleep=0,
+            mincpus=1, maxcpus=1, clusterlogdir=None, environ=None, *args, **kwargs):
+    # The environ argument allows the caller to pass in arbitrary
+    # environmental variables (e.g., JAVA_HOME) as a dict.
+    if environ is None:
+      environ = {}
+    
+    # Pass the PYTHONPATH to the cluster process. This allows us to
+    # isolate e.g. a testing instance of the code from production.
+    # Note that we can't do this as easily for PATH itself because
+    # bsub itself is in a custom location on the cluster.
+    for varname in ('PYTHONPATH', 'OSQPIPE_CONFDIR'):
+      if varname in os.environ:
+        environ[varname] = os.environ[varname]
+
+    cmd = super(SbatchCommand, self).build(cmd, *args, **kwargs)
+    
+    # Add information about environment in front of the command.
+    envstr = " ".join([ "%s=%s" % (key, val) for key, val in environ.iteritems() ])
+    cmd = envstr + " " + cmd
+
+    # In some cases it is beneficial to wait couple of seconds before the job is executed
+    # As the job may be executed immediately, we add little wait before the execution of the rest of the command.
+    if sleep > 0:
+      cmd = ('sleep %d && ' % sleep) + cmd
+
+    # uuid.uuid1() creates unique string based on hostname and time.
+    ltmpdir = tempfile.gettempdir()
+    slurmfile = str(uuid.uuid1())
+    # if cluster log dir has not been specified, overwrite locally with clusterstdoutdir
+    if clusterlogdir is None:
+      clusterlogdir = self.conf.clusterstdoutdir
+    fslurmfile = os.path.join(clusterlogdir, slurmfile)
+
+    # Create sbatch bash script to a long string
+    cmd_text = '#!/bin/bash\n'
+    if jobname is not None:
+      cmd_text += '#SBATCH -J %s\n' % jobname # where darwinjob is the jobname
+
+    #cmd_text += '#SBATCH -A CHANGEME\n' # In university cluster paid version this argument is important! I.e. which project should be charged.
+    
+    # A safety net in case min or max nr of cores gets muddled up. An
+    # explicit error is preferred in such cases, so that we can see
+    # what to fix.
+    if mincpus > maxcpus:
+      maxcpus = mincpus
+      LOGGER.info("mincpus (%d) is greater than maxcpus (%d). Maxcpus was made equal to mincpus!" % (mincpus, maxcpus))
+
+    cmd_text += '#SBATCH --nodes=%d-%d\n' % (mincpus, maxcpus) # how many whole nodes (cores) should be allocated
+    cmd_text += '#SBATCH -N 1\n' # Make sure that all cores are in one node
+    cmd_text += '#SBATCH --mail-type=NONE\n' # never receive mail
+    cmd_text += '#SBATCH -p %s\n' % queue # Queue where the job is sent.
+    cmd_text += '#SBATCH --open-mode=append\n' # record information about job re-sceduling
+    if auto_requeue:
+      cmd_text += '#SBATCH --requeue\n' # requeue job in case node dies etc.
+    else:
+      cmd_text += '#SBATCH --no-requeue\n' # do not requeue the job
+    cmd_text += '#SBATCH --mem %s\n' % mem # memory in MB
+    # cmd_text += '#SBATCH -t 0-%s\n' % time_limit # Note that time_limit is a string in format of hh:mm
+    cmd_text += '#SBATCH -o %s/%%j.stdout\n' % clusterlogdir # File to which STDOUT will be written
+    cmd_text += '#SBATCH -e %s/%%j.stderr\n' % clusterlogdir # File to which STDERR will be written
+    if depend_jobs is not None:
+      dependencies = '#SBATCH --dependency=aftercorr' # execute job after all corresponding jobs
+      for djob in depend_jobs:
+        dependencies += ':%s' % djob
+      cmd_text += '%s\n' % dependencies
+    # Following (two) lines are not necessarily needed but suggested by University Darwin cluster for record keeping in scheduler log files.
+    cmd_text += 'numnodes=$SLURM_JOB_NUM_NODES\n'
+    cmd_text += 'numtasks=$SLURM_NTASKS\n'
+    cmd_text += 'hostname=`hostname`\n'
+    cmd_text += 'workdir=\"$SLURM_SUBMIT_DIR\"\n'
+    # This is the place where the actual command we want to execute is added to the script.
+    cmd_text += 'CMD=\"%s\"\n' % cmd
+    # Change dir to work directory.
+    cmd_text += 'cd %s\n' % self.conf.clusterworkdir
+    cmd_text += 'echo -e \"Changed directory to `pwd`.\n\"\n'
+    cmd_text += 'JOBID=$SLURM_JOB_ID\n'
+    cmd_text += 'echo -e \"JobID: $JOBID\n======\"\n'
+    cmd_text += 'echo "Job start time: `date`"\n'
+    cmd_text += 'echo \"Executed in node: $hostname\"\n'
+    cmd_text += 'echo \"CPU info: `cat /proc/cpuinfo | grep name | uniq | tr -s \' \' | cut -f2 -d:`\"\n'
+    cmd_text += 'echo \"Current directory: `pwd`\"\n'
+    # cmd_text += 'echo -e \"\nnumtasks=$numtasks, numnodes=$numnodes\"\n'
+    cmd_text += 'echo -e \"Number of cores requested: min=%d, max=%d\"\n' % (mincpus, maxcpus)
+    cmd_text += 'echo -e \"Number of nodes received: $numnodes\"\n'
+    cmd_text += 'echo -e \"\nExecuting command:\n==================\n$CMD\n\"\n'
+    cmd_text += 'mv %s %s/$SLURM_JOB_ID.sh\n' % (fslurmfile, clusterlogdir)
+    cmd_text += 'eval $CMD\n\n'
+    cmd_text += 'echo "Job end time: `date`"\n'
+    # Write sbatch file to cluster
+    write_to_remote_file(cmd_text, fslurmfile, self.conf.clusteruser, self.conf.cluster, append=False)
+    # Create slurm command
+    slurmcmd = 'sbatch %s' % fslurmfile
+    
+    return slurmcmd
+
 class BsubCommand(SimpleCommand):
   '''
   Class used to build a bsub-wrapped command.
@@ -253,8 +355,16 @@ class JobSubmitter(JobRunner):
 
   def __init__(self, remote_wdir=None, *args, **kwargs):
     self.conf = Config()
-    super(JobSubmitter, self).__init__(command_builder=BsubCommand(),
-                                       *args, **kwargs)
+    
+    if self.conf.clustertype == 'SLURM':
+      super(JobSubmitter, self).__init__(command_builder=SbatchCommand(),
+                                                                                                  *args, **kwargs)
+    elif self.conf.clustertype == 'LSF':
+      super(JobSubmitter, self).__init__(command_builder=BsubCommand(),
+                                                                                                  *args, **kwargs)
+    else:
+      LOGGER.error("Unknown cluster type '%s'. Exiting.", self.conf.clustertype)
+      sys.exit(1)
 
   def submit_command(self, cmd, *args, **kwargs):
     '''
@@ -263,19 +373,27 @@ class JobSubmitter(JobRunner):
     BsubCommand.build(). The return value is the integer LSF job ID.
     '''
     pout = super(JobSubmitter, self).\
-        submit_command(cmd,
-                       *args, **kwargs)
+           submit_command(cmd,
+                          *args, **kwargs)
 
     # FIXME this could be farmed out to utilities?
-    jobid_pattern = re.compile(r"Job\s+<(\d+)>\s+is\s+submitted\s+to")
+    jobid_pattern = None
+    if self.conf.clustertype == 'LSF':
+      jobid_pattern = re.compile(r"Job\s+<(\d+)>\s+is\s+submitted\s+to")
+    elif self.conf.clustertype == 'SLURM':
+      jobid_pattern = re.compile(r"Submitted batch job (\d+)")
+    else:
+      LOGGER.error("Unknown cluster type '%s'. Exiting.", self.conf.clustertype)
+      sys.exit(1)
+
     for line in pout:
       matchobj = jobid_pattern.search(line)
       if matchobj:
         jobid = int(matchobj.group(1))
-        LOGGER.info("LSF ID of submitted job: %d", jobid)
+        LOGGER.info("ID of submitted job: %d", jobid)
         return jobid
-
-    raise ValueError("Unable to parse bsub output for job ID.")
+      
+    raise ValueError("Unable to parse job scheduler output for job ID.")
 
 class RemoteJobRunner(JobRunner):
   '''
