@@ -565,7 +565,7 @@ def write_to_remote_file(txt, remotefname, user, host, append=False):
 class BamPostProcessor(object):
 
   __slots__ = ('input_fn', 'output_fn', 'cleaned_fn', 'rgadded_fn',
-               'common_args', 'samplename')
+               'common_args', 'samplename', 'fixmateout_fn')
 
   def __init__(self, input_fn, output_fn, tmpdir=DBCONF.tmpdir, samplename=None, compress=True):
 
@@ -579,8 +579,8 @@ class BamPostProcessor(object):
     self.fixmateout_fn = output_fn
     
     # Some options are universal. Consider also adding QUIET=true, VERBOSITY=ERROR
-    self.common_args = ('VALIDATION_STRINGENCY=SILENT',
-                        'TMP_DIR=%s' % tmpdir)
+    self.common_args = ['VALIDATION_STRINGENCY=SILENT',
+                        'TMP_DIR=%s' % tmpdir]
     # In case post processing intermediate files are expected to be uncompressed add COMPRESSION_LEVEL=0
     if not compress:
       self.common_args.append('COMPRESSION_LEVEL=0')
