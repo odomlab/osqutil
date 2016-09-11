@@ -96,7 +96,7 @@ class SbatchCommand(SimpleCommand):
   '''
   Class used to build sbatch-wrapped command.
   '''
-
+  
   def build(self, cmd, mem=2000, queue=None, jobname=None,
             auto_requeue=False, depend_jobs=None, sleep=0, 
             mincpus=1, maxcpus=1, clusterlogdir=None, environ=None, *args, **kwargs):
@@ -113,7 +113,7 @@ class SbatchCommand(SimpleCommand):
       if varname in os.environ:
         environ[varname] = os.environ[varname]
 
-    cmd = super(BsubCommand, self).build(cmd, *args, **kwargs)
+    cmd = super(SbatchCommand, self).build(cmd, *args, **kwargs)
 
     # Add information about environment in front of the command.
     envstr = " ".join([ "%s=%s" % (key, val) for key, val in environ.iteritems() ])
@@ -123,83 +123,75 @@ class SbatchCommand(SimpleCommand):
     # As the job may be executed immediately, we add little wait before the execution of the rest of the command.
     if sleep > 0:
       cmd = ('sleep %d && ' % sleep) + cmd
-           
-    # We will create a slurm batch script locally and set the local and foreign path for the slurm file.
-    # NB! It may be more sensible to write all the script commands into a string and then write this string into a foreign file in cluster
-    #     using write_to_remote_file(ncommands, nfname, self.conf.clusteruser, self.conf.cluster)
-    # Note that on execution in cluster, the script will rename itself from slurmfile to <jobid>.sh.
+
     # uuid.uuid1() creates unique string based on hostname and time.
     ltmpdir = tempfile.gettempdir()
     slurmfile = str(uuid.uuid1())
-    lslurmfile = os.path.join(ltmpdir, slurmfile)
-    fslurmfile = os.path.join(clusterlogdir, slurmfile)    
+    # if cluster log dir has not been specified, overwrite locally with clusterstdoutdir
+    if clusterlogdir is None:
+      clusterlogdir = self.conf.clusterstdoutdir
+    fslurmfile = os.path.join(clusterlogdir, slurmfile)
 
-    f = open(lslurmfile, 'wb')
-    
-    # Create sbatch bash script  
-    f.write('#!/bin/bash\n')
+    # Create sbatch bash script to a long string
+    cmd_text = '#!/bin/bash\n'
     if jobname is not None:
-      f.write('#SBATCH -J %s\n' % jobname) # where darwinjob is the jobname
-    # f.write('#SBATCH -A CHANGEME\n') # which project should be charged. I think at this point this can be commented out.
+      cmd_text += '#SBATCH -J %s\n' % jobname # where darwinjob is the jobname
+
+    #cmd_text += '#SBATCH -A CHANGEME\n' # In university cluster paid version this argument is important! I.e. which project should be charged.
+
     # A safety net in case min or max nr of cores gets muddled up. An
     # explicit error is preferred in such cases, so that we can see
     # what to fix.
     if mincpus > maxcpus:
       maxcpus = mincpus
       LOGGER.info("mincpus (%d) is greater than maxcpus (%d). Maxcpus was made equal to mincpus!" % (mincpus, maxcpus))
-    f.write('#SBATCH --nodes=%d-%d\n' % (mincpus, maxcpus) ) # how many whole nodes (cores) should be allocated
-    f.write('#SBATCH -N 1\n') # Make sure that all cores are in one node
-    f.write('#SBATCH --mail-type=NONE\n') # never receive mail
-    f.write('#SBATCH -p %s\n' % queue) # Queue where the job is sent.
-    f.write('#SBATCH --open-mode=append\n') # record information about job re-sceduling
+    
+    cmd_text += '#SBATCH --nodes=%d-%d\n' % (mincpus, maxcpus) # how many whole nodes (cores) should be allocated
+    cmd_text += '#SBATCH -N 1\n' # Make sure that all cores are in one node
+    cmd_text += '#SBATCH --mail-type=NONE\n' # never receive mail
+    cmd_text += '#SBATCH -p %s\n' % queue # Queue where the job is sent.
+    cmd_text += '#SBATCH --open-mode=append\n' # record information about job re-sceduling
     if auto_requeue:
-      f.write('#SBATCH --requeue\n') # requeue job in case node dies etc.
+      cmd_text += '#SBATCH --requeue\n' # requeue job in case node dies etc.
     else:
-      f.write('#SBATCH --no-requeue\n') # do not requeue the job    
-    f.write('#SBATCH --mem %s\n' % mem) # memory in MB
-    # f.write('#SBATCH -t 0-%s\n' % time_limit) # Note that time_limit is a string in format of hh:mm
-    f.write('#SBATCH -o %s/%%j.stdout\n' % clusterlogdir) # File to which STDOUT will be written
-    f.write('#SBATCH -e %s/%%j.stderr\n' % clusterlogdir) # File to which STDERR will be written
+      cmd_text += '#SBATCH --no-requeue\n' # do not requeue the job
+    cmd_text += '#SBATCH --mem %s\n' % mem # memory in MB
+    # cmd_text += '#SBATCH -t 0-%s\n' % time_limit # Note that time_limit is a string in format of hh:mm
+    cmd_text += '#SBATCH -o %s/%%j.stdout\n' % clusterlogdir # File to which STDOUT will be written
+    cmd_text += '#SBATCH -e %s/%%j.stderr\n' % clusterlogdir # File to which STDERR will be written
     if depend_jobs is not None:
-      dependencies = '#SBATCH --dependency=aftercorr' # execute job after all corresponding jobs 
+      dependencies = '#SBATCH --dependency=aftercorr' # execute job after all corresponding jobs
       for djob in depend_jobs:
         dependencies += ':%s' % djob
-      f.write('%s\n' % dependencies)
+      cmd_text += '%s\n' % dependencies
     # Following (two) lines are not necessarily needed but suggested by University Darwin cluster for record keeping in scheduler log files.
-    f.write('numnodes=$SLURM_JOB_NUM_NODES\n')
-    f.write('numtasks=$SLURM_NTASKS\n')
-    f.write('hostname=`hostname`\n')
-    f.write('workdir=\"$SLURM_SUBMIT_DIR\"\n')
+    cmd_text += 'numnodes=$SLURM_JOB_NUM_NODES\n'
+    cmd_text += 'numtasks=$SLURM_NTASKS\n'
+    cmd_text += 'hostname=`hostname`\n'
+    cmd_text += 'workdir=\"$SLURM_SUBMIT_DIR\"\n'
     # This is the place where the actual command we want to execute is added to the script.
-    f.write('CMD=\"%s\"\n' % cmd)
+    cmd_text += 'CMD=\"%s\"\n' % cmd
     # Change dir to work directory.
-    f.write('cd %s\n' % self.conf.clusterworkdir)    
-    f.write('echo -e \"Changed directory to `pwd`.\n\"\n')
-    f.write('JOBID=$SLURM_JOB_ID\n')
-    f.write('echo -e \"JobID: $JOBID\n======\"\n')
-    f.write('echo "Job start time: `date`"\n')
-    f.write('echo \"Executed in node: $hostname\"\n')
-    f.write('echo \"CPU info: `cat /proc/cpuinfo | grep name | uniq | tr -s \' \' | cut -f2 -d:`\"\n')
-    f.write('echo \"Current directory: `pwd`\"\n')
-    # f.write('echo -e \"\nnumtasks=$numtasks, numnodes=$numnodes\"\n')     
-    f.write('echo -e \"Number of cores requested: min=%d, max=%d\"\n' % (mincpus, maxcpus))    
-    f.write('echo -e \"Number of nodes received: $numnodes\"\n')
-    f.write('echo -e \"\nExecuting command:\n==================\n$CMD\n\"\n')    
-    f.write('mv %s %s/$SLURM_JOB_ID.sh\n' % (fslurmfile, clusterlogdir))
-    f.write('eval $CMD\n\n')
-    f.write('echo "Job end time: `date`"\n')
-    f.close()
-
-    # Copy slurm file to clusterlogdir in cluster head node.
-    rjr = RemoteJobRunner(transfer_wdir=clusterlogdir)
-    rjr.remote_copy_files(filenames=[lslurmfile],destnames=[slurmfile])
-    
-    # Remove slurm file locally.
-    os.remove(lslurmfile)
-    
+    cmd_text += 'cd %s\n' % self.conf.clusterworkdir
+    cmd_text += 'echo -e \"Changed directory to `pwd`.\n\"\n'
+    cmd_text += 'JOBID=$SLURM_JOB_ID\n'
+    cmd_text += 'echo -e \"JobID: $JOBID\n======\"\n'
+    cmd_text += 'echo "Job start time: `date`"\n'
+    cmd_text += 'echo \"Executed in node: $hostname\"\n'
+    cmd_text += 'echo \"CPU info: `cat /proc/cpuinfo | grep name | uniq | tr -s \' \' | cut -f2 -d:`\"\n'
+    cmd_text += 'echo \"Current directory: `pwd`\"\n'
+    # cmd_text += 'echo -e \"\nnumtasks=$numtasks, numnodes=$numnodes\"\n'
+    cmd_text += 'echo -e \"Number of cores requested: min=%d, max=%d\"\n' % (mincpus, maxcpus)
+    cmd_text += 'echo -e \"Number of nodes received: $numnodes\"\n'
+    cmd_text += 'echo -e \"\nExecuting command:\n==================\n$CMD\n\"\n'
+    cmd_text += 'mv %s %s/$SLURM_JOB_ID.sh\n' % (fslurmfile, clusterlogdir)
+    cmd_text += 'eval $CMD\n\n'
+    cmd_text += 'echo "Job end time: `date`"\n'
+    # Write sbatch file to cluster
+    write_to_remote_file(cmd_text, fslurmfile, self.conf.clusteruser, self.conf.cluster, append=False)
     # Create slurm command
     slurmcmd = 'sbatch %s' % fslurmfile
-
+    
     return slurmcmd
   
 class BsubCommand(SimpleCommand):
@@ -393,12 +385,20 @@ class JobSubmitter(JobRunner):
                           *args, **kwargs)
     
     # FIXME this could be farmed out to utilities?
-    jobid_pattern = re.compile(r"Job\s+<(\d+)>\s+is\s+submitted\s+to")
+    jobid_pattern = None
+    if self.conf.clustertype == 'LSF':
+      jobid_pattern = re.compile(r"Job\s+<(\d+)>\s+is\s+submitted\s+to")
+    elif self.conf.clustertype == 'SLURM':
+      jobid_pattern = re.compile(r"Submitted batch job (\d+)")
+    else:
+      LOGGER.error("Unknown cluster type '%s'. Exiting.", self.conf.clustertype)
+      sys.exit(1)
+
     for line in pout:
       matchobj = jobid_pattern.search(line)
       if matchobj:
         jobid = int(matchobj.group(1))
-        LOGGER.info("LSF ID of submitted job: %d", jobid)
+        LOGGER.info("ID of submitted job: %d", jobid)
         return jobid
         
     raise ValueError("Unable to parse bsub output for job ID.")
@@ -1356,8 +1356,13 @@ class BwaAlignmentManager(AlignmentManager):
 
     (path, fname) = os.path.split(fn)
     # If cluster data transfer host has been set transfer via transfer host, otherwise transfer directly
-    if self.transferhost is not None:
-      cmd = "ssh %s@%s \"rsync -a -e \\\"ssh -o StrictHostKeyChecking=no\\\" %s@%s:%s %s\"" % (self.conf.clusteruser, self.transferhost, self.conf.clusteruser, host, bash_quote(fn), os.path.join(self.conf.clusterworkdir, bash_quote(fname)) )
+    transferhost = None
+    try:
+      transferhost = self.conf.transferhost
+    except AttributeError, _err:
+      transferhost = None
+    if transferhost is not None:
+      cmd = "ssh %s@%s \"rsync -a -e \\\"ssh -o StrictHostKeyChecking=no\\\" %s@%s:%s %s\"" % (self.conf.clusteruser, transferhost, self.conf.clusteruser, host, bash_quote(fn), os.path.join(self.conf.clusterworkdir, bash_quote(fname)) )
     else:
       cmd = "rsync -a -e \"ssh -o StrictHostKeyChecking=no\" %s@%s:%s %s" % (self.conf.clusteruser, host, bash_quote(fn), bash_quote(fname) )
 
