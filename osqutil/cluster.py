@@ -401,7 +401,7 @@ class JobSubmitter(JobRunner):
         LOGGER.info("ID of submitted job: %d", jobid)
         return jobid
         
-    raise ValueError("Unable to parse bsub output for job ID.")
+    raise ValueError("Unable to parse job scheduler output for job ID.")
 
 class RemoteJobRunner(JobRunner):
   '''
@@ -1049,7 +1049,7 @@ class BwaAlignmentManager(AlignmentManager):
     else:
       self.nocc = ''
     
-  def _run_pairedend_bwa_aln(self, fqname, fqname2, genome, jobtag, output_fn, samplename, delay=0):
+  def _run_pairedend_bwa_aln(self, fqname, fqname2, genome, jobtag, output_fn, samplename, delay=0, compress_output=False):
     '''
     Run bwa aln on paired-ended sequencing data.
     '''
@@ -1108,9 +1108,8 @@ class BwaAlignmentManager(AlignmentManager):
     mem_string = ""
     mem = int(round((int(self.conf.clustersortmem)/self.sortthreads),-2))
     if mem > 300:
-      mem_string = " -m %dM" % mem      
-    # If no split, compress output
-    if not self.split:
+      mem_string = " -m %dM" % mem
+    if compress_output:
       ncommands += ("%s sort -@ %d%s %s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
     else:
       ncommands += ("%s sort -l 0 -@ %d%s %s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
@@ -1143,7 +1142,7 @@ class BwaAlignmentManager(AlignmentManager):
 
     return(jobid_bam, outbam)
 
-  def _run_singleend_bwa_aln(self, fqname, genome, jobtag, output_fn, samplename, delay=0):
+  def _run_singleend_bwa_aln(self, fqname, genome, jobtag, output_fn, samplename, delay=0, compress_output=False):
     '''
     Run bwa aln on single-ended sequencing data.
     '''
@@ -1194,8 +1193,7 @@ class BwaAlignmentManager(AlignmentManager):
     if mem > 300:
       mem_string = "-m %dM " % mem
     # Run samtools sort
-    # If no split, compress output
-    if not self.split:
+    if compress_output:
       ncommands += ("%s sort -@ %d %s%s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
     else:
       ncommands += ("%s sort -l 0 -@ %d %s%s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
@@ -1229,7 +1227,7 @@ class BwaAlignmentManager(AlignmentManager):
 
     return "\'@RG\tID:%d\tPL:%s\tPU:%d\tLB:%s\tSM:%s\tCN:%s\'" % (int(lanenum),'illumina',int(lanenum), libcode, sample, facility)
   
-  def _run_bwa_mem(self, fqnames, genome, jobtag, output_fn, samplename, delay=0):
+  def _run_bwa_mem(self, fqnames, genome, jobtag, output_fn, samplename, delay=0, compress_output=False):
     '''
     Run bwa mem on single- or paired-end sequencing data.
     '''
@@ -1282,13 +1280,13 @@ class BwaAlignmentManager(AlignmentManager):
     
     # Run samtools sort
     # If files have not been split, compress output
-    if not self.split:
+    if compress_output:
       ncommands += ("%s sort -@ %d %s%s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
     else:
       ncommands += ("%s sort -l 0 -@ %d %s%s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
 
     # write ncommands to nfname
-    nfname = os.path.join(self.conf.clusterworkdir, "%s.nfile" % fqnames[0])    
+    nfname = os.path.join(self.conf.clusterworkdir, "%s.nfile" % fqnames[0])
     ret = write_to_remote_file(ncommands, nfname, self.conf.clusteruser, self.conf.cluster)
     if ret > 0:
       LOGGER.error("Failed to create %s:%s" % (self.conf.cluster, nfname))
@@ -1314,6 +1312,13 @@ class BwaAlignmentManager(AlignmentManager):
     # splits the fq_file by underscore and returns first element which
     # in current name
 
+    # Note that by default the bam file compression occurs in merge step.
+    # However, if input fastq is not split and output bam is expected to be normal compressed bam, we need to compress
+    # here as there won't be any merging/compressing in the end.
+    compress_output=False
+    if len(fq_files)==1:
+      compress_output=True
+    
     for fqname in fq_files:
       donumber = fqname.split("_")[0]
       jobtag   = "%s_%s" % (donumber, current)
@@ -1324,11 +1329,11 @@ class BwaAlignmentManager(AlignmentManager):
         if paired:
 
           (jobid, outbam) = self._run_pairedend_bwa_aln(fqname, fq_files2[current],
-                                                        genome, jobtag, output_fn, samplename, current)
+                                                        genome, jobtag, output_fn, samplename, current, compress_output=compress_output)
         else:
         
           (jobid, outbam) = self._run_singleend_bwa_aln(fqname,
-                                                        genome, jobtag, output_fn, samplename, current)
+                                                        genome, jobtag, output_fn, samplename, current, compress_output=compress_output)
 
       # Newer bwa mem algorithm.
       elif self.bwa_algorithm == 'mem':
@@ -1337,7 +1342,7 @@ class BwaAlignmentManager(AlignmentManager):
         if paired:
           fqnames.append(fq_files2[current])
           
-        (jobid, outbam) = self._run_bwa_mem(fqnames, genome, jobtag, output_fn, samplename)
+        (jobid, outbam) = self._run_bwa_mem(fqnames, genome, jobtag, output_fn, samplename, compress_output=compress_output)
         
       else:
         raise ValueError("BWA algorithm not recognised: %s" % self.bwa_algorithm)
