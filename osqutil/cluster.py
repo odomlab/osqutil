@@ -10,6 +10,8 @@ import os
 import re
 import logging
 import glob
+import tempfile
+import uuid
 
 from pipes import quote
 from tempfile import gettempdir
@@ -17,7 +19,7 @@ from shutil import move
 
 from osqutil.utilities import call_subprocess, bash_quote, \
     is_zipped, is_bzipped, set_file_permissions, BamPostProcessor, \
-    parse_repository_filename
+    parse_repository_filename, write_to_remote_file
 
 from osqutil.config import Config
 

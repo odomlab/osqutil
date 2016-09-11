@@ -536,6 +536,32 @@ def memoize(func):
     return cache[args]
   return wrap
 
+def write_to_remote_file(txt, remotefname, user, host, append=False):
+
+  a = ''
+  if append:
+    a = '>'
+  cmd = "ssh -o StrictHostKeyChecking=no %s@%s 'cat - %s> %s'" % (user, host, a, remotefname)
+  p = Popen(cmd, stdin=PIPE, stdout=PIPE, stderr=PIPE, shell=True)
+  p.stdin.write(txt)
+
+  (stdout, stderr) = p.communicate()
+  retcode = p.wait()
+
+  if retcode != 0:
+    if stdout is not None:
+      sys.stdout.write("STDOUT:\n")
+      sys.stdout.write(stdout)
+    if stderr is not None:
+      sys.stdout.write("STDERR:\n")
+      sys.stderr.write(stderr)
+    # Examples of common errors in STDERR:
+    # bash: ...: No such file or directory
+    # bash: ...: Permission denied
+    # ssh: Could not resolve hostname ...: Temporary failure in name resolution 
+
+  return retcode
+  
 class BamPostProcessor(object):
 
   __slots__ = ('input_fn', 'output_fn', 'cleaned_fn', 'rgadded_fn',
