@@ -9,6 +9,7 @@
 '''A collection of frequently unrelated functions used elsewhere in the code.'''
 
 import os
+import time
 import os.path
 import sys
 import re
@@ -599,6 +600,40 @@ def run_in_communication_host(argv):
   
   sys.exit(retcode)
 
+def transfer_file(source, destination, attempts = 2, sleeptime = 2):
+  '''Transfers file from source to destination using rsync. Either source or destination can be a foreign host,
+  in which case the string is expected to contain username@host:path.'''
+
+  # NOTE: double-quoting for spaces etc. in file names has to be taken care of upstream
+
+  retcode = 0
+  
+  sshflag = ''
+  if ':' in source or ':' in destination:
+    sshflag = '-e \"ssh -o StrictHostKeyChecking=no\"'
+  
+  cmd = "rsync -a --owner --group %s %s %s" % (sshflag, source, destination)
+  
+  while attempts > 0:
+    subproc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=True)
+    (stdout, stderr) = subproc.communicate()
+    retcode = subproc.wait()
+    # We write stdout and stderr where they belong in case these need to be parsed upstream
+    if stdout is not None:
+      sys.stdout.write(stdout)
+    if stderr is not None:
+      sys.stderr.write(stderr)
+    if retcode == 0:
+      break
+    else:
+      attempts -= 1           
+      if attempts <= 0:
+        break
+      time.sleep(sleeptime)
+  if retcode != 0:
+    sys.stderr.write("Failed to transfer %s to %s in %d attempts. Exiting!\n" % (source, destination, attempts))
+    sys.exit(1)
+                                
 class BamPostProcessor(object):
 
   __slots__ = ('input_fn', 'output_fn', 'cleaned_fn', 'rgadded_fn',
