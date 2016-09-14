@@ -613,8 +613,9 @@ def transfer_file(source, destination, attempts = 2, sleeptime = 2):
     sshflag = '-e \"ssh -o StrictHostKeyChecking=no\"'
   
   cmd = "rsync -a --owner --group %s %s %s" % (sshflag, source, destination)
-  
-  while attempts > 0:
+
+  a = attempts
+  while a > 0:
     subproc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=True)
     (stdout, stderr) = subproc.communicate()
     retcode = subproc.wait()
@@ -626,8 +627,8 @@ def transfer_file(source, destination, attempts = 2, sleeptime = 2):
     if retcode == 0:
       break
     else:
-      attempts -= 1           
-      if attempts <= 0:
+      a -= 1           
+      if a <= 0:
         break
       time.sleep(sleeptime)
   if retcode != 0:
