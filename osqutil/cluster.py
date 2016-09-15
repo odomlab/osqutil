@@ -98,7 +98,7 @@ class SbatchCommand(SimpleCommand):
   '''
   
   def build(self, cmd, mem=2000, queue=None, jobname=None,
-            auto_requeue=False, depend_jobs=None, sleep=0, 
+            auto_requeue=False, depend_jobs=None, sleep=0,
             mincpus=1, maxcpus=1, clusterlogdir=None, environ=None, *args, **kwargs):
     # The environ argument allows the caller to pass in arbitrary
     # environmental variables (e.g., JAVA_HOME) as a dict.
@@ -118,7 +118,7 @@ class SbatchCommand(SimpleCommand):
     # Add information about environment in front of the command.
     envstr = " ".join([ "%s=%s" % (key, val) for key, val in environ.iteritems() ])
     cmd = envstr + " " + cmd
-    
+
     # In some cases it is beneficial to wait couple of seconds before the job is executed
     # As the job may be executed immediately, we add little wait before the execution of the rest of the command.
     if sleep > 0:
@@ -138,14 +138,13 @@ class SbatchCommand(SimpleCommand):
       cmd_text += '#SBATCH -J %s\n' % jobname # where darwinjob is the jobname
 
     #cmd_text += '#SBATCH -A CHANGEME\n' # In university cluster paid version this argument is important! I.e. which project should be charged.
-
     # A safety net in case min or max nr of cores gets muddled up. An
     # explicit error is preferred in such cases, so that we can see
     # what to fix.
     if mincpus > maxcpus:
       maxcpus = mincpus
       LOGGER.info("mincpus (%d) is greater than maxcpus (%d). Maxcpus was made equal to mincpus!" % (mincpus, maxcpus))
-    
+
     cmd_text += '#SBATCH --nodes=%d-%d\n' % (mincpus, maxcpus) # how many whole nodes (cores) should be allocated
     cmd_text += '#SBATCH -N 1\n' # Make sure that all cores are in one node
     cmd_text += '#SBATCH --mail-type=NONE\n' # never receive mail
@@ -193,7 +192,7 @@ class SbatchCommand(SimpleCommand):
     slurmcmd = 'sbatch %s' % fslurmfile
     
     return slurmcmd
-  
+
 class BsubCommand(SimpleCommand):
   '''
   Class used to build a bsub-wrapped command.
@@ -383,7 +382,7 @@ class JobSubmitter(JobRunner):
     pout = super(JobSubmitter, self).\
            submit_command(cmd,
                           *args, **kwargs)
-    
+
     # FIXME this could be farmed out to utilities?
     jobid_pattern = None
     if self.conf.clustertype == 'LSF':
@@ -400,7 +399,6 @@ class JobSubmitter(JobRunner):
         jobid = int(matchobj.group(1))
         LOGGER.info("ID of submitted job: %d", jobid)
         return jobid
-        
     raise ValueError("Unable to parse job scheduler output for job ID.")
 
 class RemoteJobRunner(JobRunner):

@@ -548,18 +548,6 @@ def write_to_remote_file(txt, remotefname, user, host, append=False):
   
   (stdout, stderr) = p.communicate()
   retcode = p.wait()
-  
-  if retcode != 0:
-    if stdout is not None:
-      sys.stdout.write("STDOUT:\n")
-      sys.stdout.write(stdout)
-    if stderr is not None:
-      sys.stdout.write("STDERR:\n")
-      sys.stderr.write(stderr)
-    # Examples of common errors in STDERR:
-    # bash: ...: No such file or directory
-    # bash: ...: Permission denied
-    # ssh: Could not resolve hostname ...: Temporary failure in name resolution
     
   return retcode
 
@@ -603,6 +591,16 @@ class BamPostProcessor(object):
 
   __slots__ = ('input_fn', 'output_fn', 'cleaned_fn', 'rgadded_fn',
                'common_args', 'samplename', 'compress')
+=======
+    # ssh: Could not resolve hostname ...: Temporary failure in name resolution 
+
+  return retcode
+  
+class BamPostProcessor(object):
+
+  __slots__ = ('input_fn', 'output_fn', 'cleaned_fn', 'rgadded_fn',
+               'common_args', 'samplename', 'fixmateout_fn')
+>>>>>>> 6533da758c5b43f311e331364a08b7f4e97f42ec
 
   def __init__(self, input_fn, output_fn, tmpdir=DBCONF.tmpdir, samplename=None, compress=False):
 
@@ -615,8 +613,8 @@ class BamPostProcessor(object):
     self.rgadded_fn  = "%s_rg.bam" % output_base
     
     # Some options are universal. Consider also adding QUIET=true, VERBOSITY=ERROR
-    self.common_args = ('VALIDATION_STRINGENCY=SILENT',
-                        'TMP_DIR=%s' % tmpdir)
+    self.common_args = ['VALIDATION_STRINGENCY=SILENT',
+                        'TMP_DIR=%s' % tmpdir]
     # In case post processing intermediate files are expected to be uncompressed add COMPRESSION_LEVEL=0
     self.compress = compress
     if not compress:
