@@ -588,9 +588,9 @@ class BamPostProcessor(object):
   def clean_sam(self):
 
     # Run CleanSam
-    cmd = ('picard', 'CleanSam',
+    cmd = ['picard', 'CleanSam',
            'INPUT=%s'  % self.input_fn,
-           'OUTPUT=%s' % self.cleaned_fn) + self.common_args
+           'OUTPUT=%s' % self.cleaned_fn] + self.common_args
 
     return cmd
   
@@ -606,22 +606,22 @@ class BamPostProcessor(object):
     sample = self.samplename if self.samplename is not None else libcode
 
     # Run AddOrReplaceReadGroups
-    cmd = ('picard', 'AddOrReplaceReadGroups',
+    cmd = ['picard', 'AddOrReplaceReadGroups',
            'INPUT=%s'  % self.cleaned_fn,
            'OUTPUT=%s' % self.rgadded_fn,
            'RGLB=%s'   % libcode,
            'RGSM=%s'   % sample,
            'RGCN=%s'   % facility,
            'RGPU=%d'   % int(lanenum),
-           'RGPL=illumina') + self.common_args
+           'RGPL=illumina'] + self.common_args
 
     return cmd
 
   def fix_mate_information(self):
 
     # Run FixMateInformation
-    cmd = ('picard', 'FixMateInformation',
+    cmd = ['picard', 'FixMateInformation',
            'INPUT=%s'  % self.rgadded_fn,
-           'OUTPUT=%s' % self.output_fn) + self.common_args
+           'OUTPUT=%s' % self.output_fn] + self.common_args
 
     return cmd
