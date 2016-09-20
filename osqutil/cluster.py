@@ -758,7 +758,7 @@ class AlignmentManager(object):
     hdlr.setFormatter(fmt)
     hdlr.setLevel(min(logger.getEffectiveLevel(), logging.WARN))
     logger.addHandler(hdlr)
-
+        
   def split_fq(self, fastq_fn):
     '''
     Splits fastq file to self.split_read_count reads per file using
@@ -1063,18 +1063,51 @@ class BwaAlignmentManager(AlignmentManager):
     outbam      = outbambase + ".bam"
 
     readgroup = ""
+
+    quoted_fqnames = [bash_quote(fqname), bash_quote(fqname2), bash_quote(fqname), bash_quote(fqname2)]
+    ncommands = ""
+    cmd = ""
+    acmd = ""
+    
     # Check if readgroup information should be added by bwa
     if self.split is False:
       readgroup = "-R %s" % self._make_readgroup_string(output_fn, samplename)
       outbam     = output_fn
       outbambase = outbam.rstrip('.bam')
 
+      # in case files were not split, commands may need to be added to uncompress files on fly
+      # NB! Assuming that fqname2 has been similarly compressed
+      if fqname.endswith('.gz'):
+        p011 = "%s_p011" % fqname
+        p012 = "%s_p012" % fqname
+        p021 = "%s_p021" % fqname2
+        p022 = "%s_p022" % fqname2
+        cmd = "mknod %s p && mknod %s p && mknod %s p && mknod %s p && sleep 1 && " % (p011, p012, p021, p022)
+        ncommands = "zcat %s > %s\n" % (bash_quote(fqname), p011)
+        ncommands = "zcat %s > %s\n" % (bash_quote(fqname), p012)
+        ncommands = "zcat %s > %s\n" % (bash_quote(fqname2), p021)
+        ncommands = "zcat %s > %s\n" % (bash_quote(fqname2), p022)
+        acmd = "&& rm %s %s %s %s" % (p011, p012, p021, p022)
+        quoted_fqnames = [p011, p021, p012, p022]
+      if fqname.endswith('.bz2'):
+        p011 = "%s_p011" % fqname
+        p012 = "%s_p012" % fqname
+        p021 = "%s_p021" % fqname2
+        p022 = "%s_p022" % fqname2
+        cmd = "mknod %s p && mknod %s p && mknod %s p && mknod %s p && sleep 1 && " % (p011, p012, p021, p022)
+        ncommands = "pzcat %s > %s\n" % (bash_quote(fqname), p011)
+        ncommands = "pzcat %s > %s\n" % (bash_quote(fqname), p012)
+        ncommands = "pzcat %s > %s\n" % (bash_quote(fqname2), p021)
+        ncommands = "pzcat %s > %s\n" % (bash_quote(fqname2), p022)
+        acmd = "&& rm %s %s %s %s" % (p011, p012, p021, p022)
+        quoted_fqnames = [p011, p021, p012, p022]
+      
     # Run bwa aln
     cmd1 = "%s aln -t %d %s %s %s > %s" % (self.bwa_prog, self.threads, readgroup, genome,
-                                  bash_quote(fqname),
+                                  quoted_fqnames[0],
                                   bash_quote(sai_file1))
     cmd2 = "%s aln -t %d %s %s %s > %s" % (self.bwa_prog, self.threads, readgroup, genome,
-                                  bash_quote(fqname2),
+                                  quoted_fqnames[1],
                                   bash_quote(sai_file2))
 
     # Variables for picard tools
@@ -1092,7 +1125,7 @@ class BwaAlignmentManager(AlignmentManager):
     # Run bwa sampe
     ncommands  = ("%s sampe %s %s %s %s %s %s"
              % (self.bwa_prog, self.nocc, genome, bash_quote(sai_file1),
-                bash_quote(sai_file2), bash_quote(fqname), bash_quote(fqname2)))
+                bash_quote(sai_file2), quoted_fqnames[2], quoted_fqnames[3]))
 
     # Convert to bam
     ncommands += (" | %s view -b -S -u - > %s\n" % (self.samtools_prog, p1))
@@ -1121,7 +1154,7 @@ class BwaAlignmentManager(AlignmentManager):
       LOGGER.error("Failed to create %s:%s" % (self.conf.cluster, nfname))
       sys.exit(1)
 
-    cmd3 += " && npiper -i %s && rm %s %s %s %s %s %s %s" % (nfname, bash_quote(fqname), p1, p2, p3, nfname, sai_file1, sai_file2)
+    cmd3 += " && npiper -i %s && rm %s %s %s %s %s %s %s %s" % (nfname, bash_quote(fqname), p1, p2, p3, nfname, sai_file1, sai_file2, acmd)
 
     LOGGER.info("starting bwa step1 on '%s'", fqname)
     
@@ -1149,15 +1182,37 @@ class BwaAlignmentManager(AlignmentManager):
     jobname_bam = "%s_bam" % (jobtag,)
     outbambase  = bash_quote(fqname)
     outbam      = outbambase + ".bam"
-
+    
     readgroup = ""
+
+    quoted_fqname = [bash_quote(fqname), bash_quote(fqname)]
+    ncommands = ""
+    cmd = ""
+    acmd = ""
+        
     # Check if readgroup information should be added by bwa
     if self.split is False:
       readgroup = "-R %s" % self._make_readgroup_string(output_fn, samplename)
       outbam     = output_fn
       outbambase = outbam.rstrip('.bam')
 
-
+      # in case files were not split, commands may need to be added to uncompress files on fly
+      if fqname.endswith('.gz'):
+        p01 = "%s_p01" % fqname
+        p02 = "%s_p02" % fqname
+        cmd = "mknod %s p && mknod %s p && sleep 1 && " % (p01, p02)
+        ncommands = "zcat %s > %s\n" % (bash_quote(fqname), p01)
+        ncommands = "zcat %s > %s\n" % (bash_quote(fqname), p02)
+        acmd = "&& rm %s %s" % (p01, p02)
+        quoted_fqname = [p01, p02]
+      if fqname.endswith('.bz2'):
+        p01 = "%s_p01" % fqname
+        p02 = "%s_p02" % fqname
+        cmd = "mknod %s p && mknod %s p && sleep 1 && " % (p01, p02)
+        ncommands = "bzcat %s > %s\n" % (bash_quote(fqname), p01)
+        ncommands = "bzcat %s > %s\n" % (bash_quote(fqname), p02)
+        acmd = "&& rm %s %s" % (p01, p02)
+      quoted_fqname = [p01, p02]
 
     # Variables for picard tools
     # Some options are universal. Consider also adding QUIET=true, VERBOSITY=ERROR, TMP_DIR=DBCONF.tmpdir.
@@ -1172,11 +1227,11 @@ class BwaAlignmentManager(AlignmentManager):
     cmd = "mknod %s p && mknod %s p && mknod %s p && sleep 1" % (p1, p2, p3)
     
     # Run bwa aln
-    ncommands = ("%s aln -t %d %s %s %s" % (self.bwa_prog, self.threads, readgroup, genome, bash_quote(fqname)))
+    ncommands = ("%s aln -t %d %s %s %s" % (self.bwa_prog, self.threads, readgroup, genome, quoted_fqname[0]))
 
     # Run bwa samse
     ncommands += (" | %s samse %s %s - %s" % (self.bwa_prog, self.nocc,
-                                        genome, bash_quote(fqname)))
+                                        genome, quoted_fqname[1]))
     # Convert to bam
     ncommands += (" | %s view -b -S -u - > %s\n" % (self.samtools_prog, p1))
     
@@ -1205,7 +1260,7 @@ class BwaAlignmentManager(AlignmentManager):
       LOGGER.error("Failed to create %s:%s" % (self.conf.cluster, nfname))
       sys.exit(1)
 
-    cmd += " && npiper -i %s && rm %s %s %s %s %s" % (nfname, bash_quote(fqname), p1, p2, p3, nfname)
+    cmd += " && npiper -i %s && rm %s %s %s %s %s %s" % (nfname, bash_quote(fqname), p1, p2, p3, nfname, acmd)
     
     LOGGER.info("starting bwa on '%s'", fqname)
     LOGGER.debug(cmd)
@@ -1237,16 +1292,38 @@ class BwaAlignmentManager(AlignmentManager):
     jobname_bam = "%s_bam" % (jobtag,)
     outbambase  = bash_quote(fqnames[0])
     outbam      = outbambase + ".bam"
-
+    
     readgroup = ""
+
+    ncommands = ""
+    cmd = ""
+    acmd = ""
+    quoted_fqnames = " ".join([ bash_quote(fqn) for fqn in fqnames ])
+
     # Check if readgroup information should be added by bwa
     if self.split is False:
       readgroup = "-R %s" % self._make_readgroup_string(output_fn, samplename)
       outbam     = output_fn
       outbambase = outbam.rstrip('.bam')
-      
-    quoted_fqnames = " ".join([ bash_quote(fqn) for fqn in fqnames ])
 
+      # in case files were not split, commands may need to be added to uncompress files on fly
+      if fqnames[0].endswith('.gz'):
+        p01 = "%s_p01" % fqnames[0]
+        p02 = "%s_p02" % fqnames[0]
+        cmd += "mknod %s p && mknod %s p && sleep 1 && " % (p01, p02)
+        ncommands += "zcat %s > %s\n" % (bash_quote(fqnames[0]), p01)
+        ncommands += "zcat %s > %s\n" % (bash_quote(fqnames[1]), p02)
+        quoted_fqnames = "%s %s" % (p01, p02)
+        acmd = "&& rm %s %s" % (p01, p02)
+      if fqnames[0].endswith('.bz2'):
+        p01 = "%s_p01" % fqnames[0]
+        p02 = "%s_p02" % fqnames[0]
+        cmd += "mknod %s p && mknod %s p && sleep 1 && " % (p01, p02)
+        ncommands += "bzcat %s > %s\n" % (bash_quote(fqnames[0]),p01)
+        ncommands += "bzcat %s > %s\n" % (bash_quote(fqnames[1]),p02)
+        quoted_fqnames = "%s %s" % (p01, p02)
+        acmd = "&& rm %s %s" % (p01, p02)
+        
     # Variables for picard tools
     # Some options are universal. Consider also adding QUIET=true, VERBOSITY=ERROR, TMP_DIR=DBCONF.tmpdir.
     # Though, no the picard commands below should not require write of any temporary files.
@@ -1257,10 +1334,10 @@ class BwaAlignmentManager(AlignmentManager):
     p2 = "%s_p2" % fqnames[0]
     p3 = "%s_p3" % fqnames[0]
 
-    cmd = "mknod %s p && mknod %s p && mknod %s p && sleep 1" % (p1, p2, p3)
-    
+    cmd += "mknod %s p && mknod %s p && mknod %s p && sleep 1" % (p1, p2, p3)
+
     # Run bwa mem
-    ncommands = "%s mem %s -t %d %s %s" % (self.bwa_prog, readgroup, self.threads, genome, quoted_fqnames)
+    ncommands += "%s mem %s -t %d %s %s" % (self.bwa_prog, readgroup, self.threads, genome, quoted_fqnames)    
 
     # Run sam to bam conversion
     ncommands += (" | %s view -b -S -u - > %s\n" % (self.samtools_prog, p1))
@@ -1293,7 +1370,7 @@ class BwaAlignmentManager(AlignmentManager):
       sys.exit(1)
 
     # Run npiper and clean up temporary files.
-    cmd += " && npiper -i %s && rm %s %s %s %s %s" % (nfname, p1, p2, p3, nfname, quoted_fqnames)
+    cmd += " && npiper -i %s && rm %s %s %s %s %s %s" % (nfname, p1, p2, p3, nfname, quoted_fqnames, acmd)
     
     LOGGER.info("Starting bwa mem on fastq files: %s", quoted_fqnames)
     LOGGER.debug(cmd)
