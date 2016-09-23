@@ -565,7 +565,7 @@ def write_to_remote_file(txt, remotefname, user, host, append=False):
 class BamPostProcessor(object):
 
   __slots__ = ('input_fn', 'output_fn', 'cleaned_fn', 'rgadded_fn',
-               'common_args', 'samplename', 'fixmateout_fn')
+               'common_args', 'samplename')
 
   def __init__(self, input_fn, output_fn, tmpdir=DBCONF.tmpdir, samplename=None, compress=True):
 
@@ -576,7 +576,6 @@ class BamPostProcessor(object):
     output_base = os.path.splitext(output_fn)[0]
     self.cleaned_fn  = "%s_cleaned.bam" % output_base
     self.rgadded_fn  = "%s_rg.bam" % output_base
-    self.fixmateout_fn = output_fn
     
     # Some options are universal. Consider also adding QUIET=true, VERBOSITY=ERROR
     self.common_args = ['VALIDATION_STRINGENCY=SILENT',
