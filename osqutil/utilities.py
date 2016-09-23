@@ -576,11 +576,10 @@ class BamPostProcessor(object):
     output_base = os.path.splitext(output_fn)[0]
     self.cleaned_fn  = "%s_cleaned.bam" % output_base
     self.rgadded_fn  = "%s_rg.bam" % output_base
-    self.fixmateout_fn = output_fn
     
     # Some options are universal. Consider also adding QUIET=true, VERBOSITY=ERROR
-    self.common_args = ('VALIDATION_STRINGENCY=SILENT',
-                        'TMP_DIR=%s' % tmpdir)
+    self.common_args = ['VALIDATION_STRINGENCY=SILENT',
+                        'TMP_DIR=%s' % tmpdir]
     # In case post processing intermediate files are expected to be uncompressed add COMPRESSION_LEVEL=0
     if not compress:
       self.common_args.append('COMPRESSION_LEVEL=0')
@@ -588,9 +587,9 @@ class BamPostProcessor(object):
   def clean_sam(self):
 
     # Run CleanSam
-    cmd = ('picard', 'CleanSam',
+    cmd = ['picard', 'CleanSam',
            'INPUT=%s'  % self.input_fn,
-           'OUTPUT=%s' % self.cleaned_fn) + self.common_args
+           'OUTPUT=%s' % self.cleaned_fn] + self.common_args
 
     return cmd
   
@@ -606,22 +605,22 @@ class BamPostProcessor(object):
     sample = self.samplename if self.samplename is not None else libcode
 
     # Run AddOrReplaceReadGroups
-    cmd = ('picard', 'AddOrReplaceReadGroups',
+    cmd = ['picard', 'AddOrReplaceReadGroups',
            'INPUT=%s'  % self.cleaned_fn,
            'OUTPUT=%s' % self.rgadded_fn,
            'RGLB=%s'   % libcode,
            'RGSM=%s'   % sample,
            'RGCN=%s'   % facility,
            'RGPU=%d'   % int(lanenum),
-           'RGPL=illumina') + self.common_args
+           'RGPL=illumina'] + self.common_args
 
     return cmd
 
   def fix_mate_information(self):
 
     # Run FixMateInformation
-    cmd = ('picard', 'FixMateInformation',
+    cmd = ['picard', 'FixMateInformation',
            'INPUT=%s'  % self.rgadded_fn,
-           'OUTPUT=%s' % self.output_fn) + self.common_args
+           'OUTPUT=%s' % self.output_fn] + self.common_args
 
     return cmd
