@@ -136,7 +136,6 @@ class SbatchCommand(SimpleCommand):
     cmd_text = '#!/bin/bash\n'
     if jobname is not None:
       cmd_text += '#SBATCH -J %s\n' % jobname # where darwinjob is the jobname
-
     #cmd_text += '#SBATCH -A CHANGEME\n' # In university cluster paid version this argument is important! I.e. which project should be charged.
     # A safety net in case min or max nr of cores gets muddled up. An
     # explicit error is preferred in such cases, so that we can see
@@ -148,7 +147,10 @@ class SbatchCommand(SimpleCommand):
     cmd_text += '#SBATCH --nodes=%d-%d\n' % (mincpus, maxcpus) # how many whole nodes (cores) should be allocated
     cmd_text += '#SBATCH -N 1\n' # Make sure that all cores are in one node
     cmd_text += '#SBATCH --mail-type=NONE\n' # never receive mail
-    cmd_text += '#SBATCH -p %s\n' % queue # Queue where the job is sent.
+    if queue is None:
+      cmd_text += '#SBATCH -p %s\n' % self.conf.clusterqueue # Queue where the job is sent.
+    else:
+      cmd_text += '#SBATCH -p %s\n' % queue # Queue where the job is sent.
     cmd_text += '#SBATCH --open-mode=append\n' # record information about job re-sceduling
     if auto_requeue:
       cmd_text += '#SBATCH --requeue\n' # requeue job in case node dies etc.
@@ -613,8 +615,15 @@ class ClusterJobSubmitter(RemoteJobRunner):
       self.transfer_wdir = self.remote_wdir
 
     # Must call this *after* setting the remote host info.
-    super(ClusterJobSubmitter, self).__init__(command_builder=BsubCommand(),
-                      *args, **kwargs)
+    if self.conf.clustertype == 'SLURM':
+      super(ClusterJobSubmitter, self).__init__(command_builder=SbatchCommand(),
+                                                *args, **kwargs)
+    elif self.conf.clustertype == 'LSF':
+      super(ClusterJobSubmitter, self).__init__(command_builder=BsubCommand(),
+                                                *args, **kwargs)
+    else:
+      LOGGER.error("Unknown cluster type '%s'. Exiting.", self.conf.clustertype)
+      sys.exit(1)
 
   def submit_command(self, cmd, *args, **kwargs):
     '''
@@ -627,13 +636,21 @@ class ClusterJobSubmitter(RemoteJobRunner):
                           path=self.conf.clusterpath,
                           *args, **kwargs)
 
-    jobid_pattern = re.compile(r"Job\s+<(\d+)>\s+is\s+submitted\s+to")
+    jobid_pattern = None
+    if self.conf.clustertype == 'LSF':
+      jobid_pattern = re.compile(r"Job\s+<(\d+)>\s+is\s+submitted\s+to")
+    elif self.conf.clustertype == 'SLURM':
+      jobid_pattern = re.compile(r"Submitted batch job (\d+)")
+    else:
+      LOGGER.error("Unknown cluster type '%s'. Exiting.", self.conf.clustertype)
+      sys.exit(1)
+    
     if not self.test_mode:
       for line in pout:
         matchobj = jobid_pattern.search(line)
         if matchobj:
           jobid = int(matchobj.group(1))
-          LOGGER.info("LSF ID of submitted job: %d", jobid)
+          LOGGER.info("ID of submitted job: %d", jobid)
           return jobid
 
       raise ValueError("Unable to parse bsub output for job ID.")
@@ -827,8 +844,7 @@ class AlignmentManager(object):
     LOGGER.debug(cmd)
 
     jobname = bam_files[0].split("_")[0] + "bam"
-
-    jobid = self._submit_lsfjob(cmd, jobname, depend, mem=8000, threads=self.threads) # Merge does not require much memory but as many cores as possible for compression is good!
+    jobid = self._submit_lsfjob(cmd, jobname, depend, mem=12000)
     LOGGER.debug("got job id '%s'", jobid)
 
   def _submit_lsfjob(self, command, jobname, depend=None, sleep=0, mem=8000, threads=1):

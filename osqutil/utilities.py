@@ -586,21 +586,11 @@ def run_in_communication_host(argv):
   sys.stderr.write(stderr)    
   
   sys.exit(retcode)
-
-class BamPostProcessor(object):
-
-  __slots__ = ('input_fn', 'output_fn', 'cleaned_fn', 'rgadded_fn',
-               'common_args', 'samplename', 'compress')
-=======
-    # ssh: Could not resolve hostname ...: Temporary failure in name resolution 
-
-  return retcode
   
 class BamPostProcessor(object):
 
   __slots__ = ('input_fn', 'output_fn', 'cleaned_fn', 'rgadded_fn',
-               'common_args', 'samplename', 'fixmateout_fn')
->>>>>>> 6533da758c5b43f311e331364a08b7f4e97f42ec
+               'common_args', 'samplename', 'compress')
 
   def __init__(self, input_fn, output_fn, tmpdir=DBCONF.tmpdir, samplename=None, compress=False):
 
@@ -623,9 +613,9 @@ class BamPostProcessor(object):
   def clean_sam(self):
 
     # Run CleanSam
-    cmd = ('picard', 'CleanSam',
+    cmd = ['picard', 'CleanSam',
            'INPUT=%s'  % self.input_fn,
-           'OUTPUT=%s' % self.cleaned_fn) + self.common_args
+           'OUTPUT=%s' % self.cleaned_fn] + self.common_args
 
     return cmd
   
@@ -641,22 +631,27 @@ class BamPostProcessor(object):
     sample = self.samplename if self.samplename is not None else libcode
 
     # Run AddOrReplaceReadGroups
-    cmd = ('picard', 'AddOrReplaceReadGroups',
+    cmd = ['picard', 'AddOrReplaceReadGroups',
            'INPUT=%s'  % self.cleaned_fn,
            'OUTPUT=%s' % self.rgadded_fn,
            'RGLB=%s'   % libcode,
            'RGSM=%s'   % sample,
            'RGCN=%s'   % facility,
            'RGPU=%d'   % int(lanenum),
-           'RGPL=illumina') + self.common_args
+           'RGPL=illumina'] + self.common_args
 
     return cmd
 
   def fix_mate_information(self):
 
     # Run FixMateInformation
-    cmd = ('picard', 'FixMateInformation',
+    cmd = ['picard', 'FixMateInformation',
            'INPUT=%s'  % self.rgadded_fn,
+<<<<<<< HEAD
            'OUTPUT=%s' % self.output_fn) + self.common_args
       
+=======
+           'OUTPUT=%s' % self.output_fn] + self.common_args
+
+>>>>>>> ed5642cf1f7483326b3105a40996db7316d01811
     return cmd
