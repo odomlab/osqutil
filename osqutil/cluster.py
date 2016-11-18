@@ -233,7 +233,7 @@ class BsubCommand(SimpleCommand):
     # are not supported by our local cluster. Quelle surprise.
     try:
       provider = self.conf.clusterprovider
-      if provider[:3].lower() == 'san':
+      if provider[:3].lower() == 'san' or provider[:3].lower() == 'ebi':
         resources = ('select[mem>%d] ' % mem) + resources
         memreq    = '-M %d' % mem
     except AttributeError:
