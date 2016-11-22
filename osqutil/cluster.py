@@ -184,7 +184,12 @@ class SbatchCommand(SimpleCommand):
     cmd_text += 'eval $CMD\n\n'
     cmd_text += 'echo "Job end time: `date`"\n'
     # Write sbatch file to cluster
-    write_to_remote_file(cmd_text, fslurmfile, self.conf.clusteruser, self.conf.cluster, append=False)
+    try:
+      sshkey = self.conf.clustersshkey
+    except AttributeError, _err:
+      sshkey = None
+    write_to_remote_file(cmd_text, fslurmfile, self.conf.clusteruser,
+                         self.conf.cluster, append=False, sshkey=sshkey)
     # Create slurm command
     slurmcmd = 'sbatch %s' % fslurmfile
     
@@ -447,15 +452,15 @@ class RemoteJobRunner(JobRunner):
       pathdef = "PATH=%s" % path
 
     # Allow for custom ssh key specification in our config.
-    cmd = "ssh"
+    sshcmd = "ssh"
     try:
       sshkey = self.conf.clustersshkey
-      cmd += ' -i %s' % sshkey
+      sshcmd += ' -i %s' % sshkey
     except AttributeError, _err:
       pass
 
     cmd = ("%s -p %s %s@%s \"source /etc/profile; cd %s && %s %s\""
-           % (cmd,
+           % (sshcmd,
               str(self.remote_port),
               self.remote_user,
               self.remote_host,

@@ -536,12 +536,16 @@ def memoize(func):
     return cache[args]
   return wrap
 
-def write_to_remote_file(txt, remotefname, user, host, append=False):
+def write_to_remote_file(txt, remotefname, user, host, append=False, sshkey=None):
 
   a = ''
   if append:
     a = '>'
-  cmd = "ssh -o StrictHostKeyChecking=no %s@%s 'cat - %s> %s'" % (user, host, a, remotefname)
+  if sshkey is None:
+    sshcmd = 'ssh'
+  else:
+    sshcmd = 'ssh -i %s' % sshkey
+  cmd = "%s -o StrictHostKeyChecking=no %s@%s 'cat - %s> %s'" % (sshcmd, user, host, a, remotefname)
   p = Popen(cmd, stdin=PIPE, stdout=PIPE, stderr=PIPE, shell=True)
   p.stdin.write(txt)
 
