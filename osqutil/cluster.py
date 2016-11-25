@@ -917,8 +917,10 @@ class AlignmentManager(object):
     '''
     Copies file to target location.
     '''
-    qname = bash_quote(fname)    
-    cmd = "scp -p -q %s %s" % (qname, target)
+    qname = bash_quote(fname)
+    # Scp is not efficient, replacing with rsync on low encryption
+    # cmd = "scp -p -q %s %s" % (qname, target)
+    cmd = "rsync -a -e \"ssh -o StrictHostKeyChecking=no -c arcfour\" %s %s" % (target, qname)
     LOGGER.debug(cmd)
     pout = call_subprocess(cmd, shell=True,
                            tmpdir=self.conf.clusterworkdir,
@@ -1444,9 +1446,9 @@ class BwaAlignmentManager(AlignmentManager):
     except AttributeError, _err:
       transferhost = None
     if transferhost is not None:
-      cmd = "ssh %s@%s \"rsync -a -e \\\"ssh -o StrictHostKeyChecking=no\\\" %s@%s:%s %s\"" % (self.conf.clusteruser, transferhost, self.conf.clusteruser, host, bash_quote(fn), os.path.join(self.conf.clusterworkdir, bash_quote(fname)) )
+      cmd = "ssh %s@%s \"rsync -a -e \\\"ssh -o StrictHostKeyChecking=no -c arcfour\\\" %s@%s:%s %s\"" % (self.conf.clusteruser, transferhost, self.conf.clusteruser, host, bash_quote(fn), os.path.join(self.conf.clusterworkdir, bash_quote(fname)) )
     else:
-      cmd = "rsync -a -e \"ssh -o StrictHostKeyChecking=no\" %s@%s:%s %s" % (self.conf.clusteruser, host, bash_quote(fn), bash_quote(fname) )
+      cmd = "rsync -a -e \"ssh -o StrictHostKeyChecking=no -c arcfour\" %s@%s:%s %s" % (self.conf.clusteruser, host, bash_quote(fn), bash_quote(fname) )
 
     LOGGER.info("Downloading %s" % (fname))
     
@@ -1472,8 +1474,7 @@ class BwaAlignmentManager(AlignmentManager):
         
     if retcode !=0:
       raise StandardError("ERROR. Failed to transfer file. Command was:\n   %s\n"
-                  % (" ".join(cmd),) )
-    
+                  % (" ".join(cmd),) )    
     time_diff = time.time() - start_time
     LOGGER.info("%s transferred in %d seconds." % (fname, time_diff) )
     
@@ -1546,8 +1547,11 @@ class BwaAlignmentManager(AlignmentManager):
 
     # Merge if there is more than 1 file to merge.
     if self.split:
-      self.queue_merge(bam_files, job_ids, bam_fn, rcp_target, samplename)
-
+      self.queue_merge(bam_files, job_ids, output_fn, rcp_target, samplename)
+    else:
+      if rcp_target:
+        self.copy_result(rcp_target, bam_fn)
+        LOGGER.info("copied '%s' to '%s'", output_fn, rcp_target)
 
 ##########################################################################
     
