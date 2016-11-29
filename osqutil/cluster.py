@@ -143,7 +143,7 @@ class SbatchCommand(SimpleCommand):
     if mincpus > maxcpus:
       maxcpus = mincpus
       LOGGER.info("mincpus (%d) is greater than maxcpus (%d). Maxcpus was made equal to mincpus!" % (mincpus, maxcpus))
-    
+
     cmd_text += '#SBATCH --nodes=%d-%d\n' % (mincpus, maxcpus) # how many whole nodes (cores) should be allocated
     cmd_text += '#SBATCH -N 1\n' # Make sure that all cores are in one node
     cmd_text += '#SBATCH --mail-type=NONE\n' # never receive mail
@@ -151,7 +151,6 @@ class SbatchCommand(SimpleCommand):
       cmd_text += '#SBATCH -p %s\n' % self.conf.clusterqueue # Queue where the job is sent.
     else:
       cmd_text += '#SBATCH -p %s\n' % queue # Queue where the job is sent.
-
     cmd_text += '#SBATCH --open-mode=append\n' # record information about job re-sceduling
     if auto_requeue:
       cmd_text += '#SBATCH --requeue\n' # requeue job in case node dies etc.
@@ -325,8 +324,7 @@ class JobRunner(object):
   See the ClusterJobSubmitter class for how this has been extended to
   submitting to a remote LSF head node.
   '''
-
-  __slots__ = ('test_mode', 'config', 'command_builder')
+  __slots__ = ('test_mode', 'conf', 'command_builder')
 
   def __init__(self, test_mode=False, command_builder=None, *args, **kwargs):
     self.test_mode = test_mode
@@ -334,8 +332,8 @@ class JobRunner(object):
       LOGGER.setLevel(logging.DEBUG)
     else:
       LOGGER.setLevel(logging.INFO)
-      
-    self.config = Config()
+
+    self.conf = Config()
 
     self.command_builder = SimpleCommand() \
         if command_builder is None else command_builder
@@ -348,7 +346,7 @@ class JobRunner(object):
       cmd = self.command_builder.build(cmd, *args, **kwargs)
       
     if path is None:
-      path = self.config.hostpath
+      path = self.conf.hostpath
 
     if tmpdir is None:
       tmpdir = gettempdir()
@@ -373,16 +371,17 @@ class JobSubmitter(JobRunner):
   '''Class to run jobs via LSF/bsub on the local host (i.e., when running on the cluster).'''
   
   def __init__(self, remote_wdir=None, *args, **kwargs):
-    self.conf = Config()
+
+    conf = Config() # self.conf is set in superclass __init__
     
-    if self.conf.clustertype == 'SLURM':
+    if conf.clustertype == 'SLURM':
       super(JobSubmitter, self).__init__(command_builder=SbatchCommand(),
                                          *args, **kwargs)
-    elif self.conf.clustertype == 'LSF':
+    elif conf.clustertype == 'LSF':
       super(JobSubmitter, self).__init__(command_builder=BsubCommand(),
                                          *args, **kwargs)
     else:
-      LOGGER.error("Unknown cluster type '%s'. Exiting.", self.conf.clustertype)
+      LOGGER.error("Unknown cluster type '%s'. Exiting.", conf.clustertype)
       sys.exit(1)
 
   def submit_command(self, cmd, *args, **kwargs):
@@ -641,7 +640,6 @@ class ClusterJobSubmitter(RemoteJobRunner):
       self.transfer_wdir = self.remote_wdir
 
     # Must call this *after* setting the remote host info.
-
     if conf.clustertype == 'SLURM':
       super(ClusterJobSubmitter, self).__init__(command_builder=SbatchCommand(),
                                                 *args, **kwargs)
@@ -659,10 +657,9 @@ class ClusterJobSubmitter(RemoteJobRunner):
     BsubCommand.build(). The return value is the integer LSF job ID.
     '''    
     pout = super(ClusterJobSubmitter, self).\
-           submit_command(cmd,
-                          path=self.conf.clusterpath,
-                          *args, **kwargs)
-
+        submit_command(cmd,
+                       path=self.conf.clusterpath,
+                       *args, **kwargs)
     jobid_pattern = None
     if self.conf.clustertype == 'LSF':
       jobid_pattern = re.compile(r"Job\s+<(\d+)>\s+is\s+submitted\s+to")
@@ -695,7 +692,6 @@ class ClusterJobRunner(RemoteJobRunner):
     self.remote_port = conf.clusterport
     self.remote_user = conf.clusteruser
     self.remote_wdir = conf.clusterworkdir if remote_wdir is None else remote_wdir
-
     try:
       self.transfer_host = conf.transferhost
     except AttributeError, _err:
@@ -873,7 +869,7 @@ class AlignmentManager(object):
 
     jobname = bam_files[0].split("_")[0] + "bam"
 
-    jobid = self._submit_lsfjob(cmd, jobname, depend, mem=8000, threads=self.threads) # Merge does not require much memory but as many cores as possible for compression is good!
+    jobid = self._submit_lsfjob(cmd, jobname, depend, mem=12000, threads=self.threads) # Merge does not require much memory but as many cores as possible for compression is good.
     LOGGER.debug("got job id '%s'", jobid)
 
   def _submit_lsfjob(self, command, jobname, depend=None, sleep=0, mem=8000, threads=1):
