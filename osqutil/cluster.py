@@ -12,8 +12,6 @@ import logging
 import glob
 import tempfile
 import uuid
-
-from subprocess import Popen, PIPE
 import time
 
 from pipes import quote
@@ -96,9 +94,9 @@ class SbatchCommand(SimpleCommand):
   '''
   Class used to build sbatch-wrapped command.
   '''
-  
+
   def build(self, cmd, mem=2000, queue=None, jobname=None,
-            auto_requeue=False, depend_jobs=None, sleep=0, 
+            auto_requeue=False, depend_jobs=None, sleep=0,
             mincpus=1, maxcpus=1, clusterlogdir=None, environ=None, *args, **kwargs):
     # The environ argument allows the caller to pass in arbitrary
     # environmental variables (e.g., JAVA_HOME) as a dict.
@@ -118,7 +116,7 @@ class SbatchCommand(SimpleCommand):
     # Add information about environment in front of the command.
     envstr = " ".join([ "%s=%s" % (key, val) for key, val in environ.iteritems() ])
     cmd = envstr + " " + cmd
-    
+
     # In some cases it is beneficial to wait couple of seconds before the job is executed
     # As the job may be executed immediately, we add little wait before the execution of the rest of the command.
     if sleep > 0:
@@ -149,7 +147,11 @@ class SbatchCommand(SimpleCommand):
     cmd_text += '#SBATCH --nodes=%d-%d\n' % (mincpus, maxcpus) # how many whole nodes (cores) should be allocated
     cmd_text += '#SBATCH -N 1\n' # Make sure that all cores are in one node
     cmd_text += '#SBATCH --mail-type=NONE\n' # never receive mail
-    cmd_text += '#SBATCH -p %s\n' % queue # Queue where the job is sent.
+    if queue is None:
+      cmd_text += '#SBATCH -p %s\n' % self.conf.clusterqueue # Queue where the job is sent.
+    else:
+      cmd_text += '#SBATCH -p %s\n' % queue # Queue where the job is sent.
+
     cmd_text += '#SBATCH --open-mode=append\n' # record information about job re-sceduling
     if auto_requeue:
       cmd_text += '#SBATCH --requeue\n' # requeue job in case node dies etc.
@@ -188,12 +190,19 @@ class SbatchCommand(SimpleCommand):
     cmd_text += 'eval $CMD\n\n'
     cmd_text += 'echo "Job end time: `date`"\n'
     # Write sbatch file to cluster
-    write_to_remote_file(cmd_text, fslurmfile, self.conf.clusteruser, self.conf.cluster, append=False)
+
+    try:
+      sshkey = self.conf.clustersshkey
+    except AttributeError, _err:
+      sshkey = None
+    write_to_remote_file(cmd_text, fslurmfile, self.conf.clusteruser,
+                         self.conf.cluster, append=False, sshkey=sshkey)
+
     # Create slurm command
     slurmcmd = 'sbatch %s' % fslurmfile
     
     return slurmcmd
-  
+
 class BsubCommand(SimpleCommand):
   '''
   Class used to build a bsub-wrapped command.
@@ -237,7 +246,7 @@ class BsubCommand(SimpleCommand):
     # are not supported by our local cluster. Quelle surprise.
     try:
       provider = self.conf.clusterprovider
-      if provider[:3].lower() == 'san':
+      if provider[:3].lower() == 'san' or provider[:3].lower() == 'ebi':
         resources = ('select[mem>%d] ' % mem) + resources
         memreq    = '-M %d' % mem
     except AttributeError:
@@ -316,7 +325,9 @@ class JobRunner(object):
   See the ClusterJobSubmitter class for how this has been extended to
   submitting to a remote LSF head node.
   '''
+
   __slots__ = ('test_mode', 'config', 'command_builder')
+
   def __init__(self, test_mode=False, command_builder=None, *args, **kwargs):
     self.test_mode = test_mode
     if test_mode:
@@ -325,7 +336,7 @@ class JobRunner(object):
       LOGGER.setLevel(logging.INFO)
       
     self.config = Config()
-    
+
     self.command_builder = SimpleCommand() \
         if command_builder is None else command_builder
 
@@ -338,7 +349,7 @@ class JobRunner(object):
       
     if path is None:
       path = self.config.hostpath
-      
+
     if tmpdir is None:
       tmpdir = gettempdir()
       
@@ -383,7 +394,7 @@ class JobSubmitter(JobRunner):
     pout = super(JobSubmitter, self).\
            submit_command(cmd,
                           *args, **kwargs)
-    
+
     # FIXME this could be farmed out to utilities?
     jobid_pattern = None
     if self.conf.clustertype == 'LSF':
@@ -400,7 +411,7 @@ class JobSubmitter(JobRunner):
         jobid = int(matchobj.group(1))
         LOGGER.info("ID of submitted job: %d", jobid)
         return jobid
-        
+
     raise ValueError("Unable to parse job scheduler output for job ID.")
 
 class RemoteJobRunner(JobRunner):
@@ -450,8 +461,17 @@ class RemoteJobRunner(JobRunner):
         path = ":".join(path)
       pathdef = "PATH=%s" % path
 
-    cmd = ("ssh -p %s %s@%s \"source /etc/profile; cd %s && %s %s\""
-           % (str(self.remote_port),
+    # Allow for custom ssh key specification in our config.
+    sshcmd = "ssh"
+    try:
+      sshkey = self.conf.clustersshkey
+      sshcmd += ' -i %s' % sshkey
+    except AttributeError, _err:
+      pass
+
+    cmd = ("%s -p %s %s@%s \"source /etc/profile; cd %s && %s %s\""
+           % (sshcmd,
+              str(self.remote_port),
               self.remote_user,
               self.remote_host,
               wdir,
@@ -459,7 +479,7 @@ class RemoteJobRunner(JobRunner):
               re.sub(r'"', r'\"', cmd)))
     LOGGER.debug(cmd)
     if not self.test_mode:
-      return call_subprocess(cmd, shell=True, path=self.config.hostpath)
+      return call_subprocess(cmd, shell=True, path=self.conf.hostpath)
     return None
 
   def find_remote_executable(self, progname, path=None):
@@ -513,6 +533,12 @@ class RemoteJobRunner(JobRunner):
       cmdbits = ['scp', '-P', str(self.remote_port)]
       if same_permissions: # default is to use the configured umask.
         cmdbits += ['-p']
+      try:
+        sshkey = self.conf.clustersshkey
+        cmdbits += ['-i', sshkey]
+      except AttributeError, _err:
+        pass
+
       cmdbits += ['-q', bash_quote(fromfn),
                   "%s@%s:%s" % (self.remote_user,
                                 self.transfer_host,
@@ -521,7 +547,7 @@ class RemoteJobRunner(JobRunner):
 
       LOGGER.debug(cmd)
       if not self.test_mode:
-        call_subprocess(cmd, shell=True, path=self.config.hostpath)
+        call_subprocess(cmd, shell=True, path=self.conf.hostpath)
 
   def remote_uncompress_file(self, fname, zipcommand='gzip'):
     '''
@@ -597,26 +623,34 @@ class ClusterJobSubmitter(RemoteJobRunner):
 
   def __init__(self, remote_wdir=None, *args, **kwargs):
 
-    self.conf        = Config()
-    self.remote_host = self.conf.cluster
-    self.remote_port = self.conf.clusterport
-    self.remote_user = self.conf.clusteruser
-    self.remote_wdir = self.conf.clusterworkdir if remote_wdir is None else remote_wdir
+    conf        = Config() # self.conf is set in superclass __init__
+    self.remote_host = conf.cluster
+    self.remote_port = conf.clusterport
+    self.remote_user = conf.clusteruser
+    self.remote_wdir = conf.clusterworkdir if remote_wdir is None else remote_wdir
     try:
-      self.transfer_host = self.conf.transferhost
+      self.transfer_host = conf.transferhost
     except AttributeError, _err:
       # LOGGER.debug("Falling back to cluster host for transfer.")
       # self.transfer_host = self.remote_host
       self.transfer_host = None
     try:
-      self.transfer_wdir = self.conf.transferdir
+      self.transfer_wdir = conf.transferdir
     except AttributeError, _err:
       LOGGER.debug("Falling back to cluster remote directory for transfer.")
       self.transfer_wdir = self.remote_wdir
 
     # Must call this *after* setting the remote host info.
-    super(ClusterJobSubmitter, self).__init__(command_builder=BsubCommand(),
-                      *args, **kwargs)
+
+    if conf.clustertype == 'SLURM':
+      super(ClusterJobSubmitter, self).__init__(command_builder=SbatchCommand(),
+                                                *args, **kwargs)
+    elif conf.clustertype == 'LSF':
+      super(ClusterJobSubmitter, self).__init__(command_builder=BsubCommand(),
+                                                *args, **kwargs)
+    else:
+      LOGGER.error("Unknown cluster type '%s'. Exiting.", conf.clustertype)
+      sys.exit(1)
 
   def submit_command(self, cmd, *args, **kwargs):
     '''
@@ -629,13 +663,21 @@ class ClusterJobSubmitter(RemoteJobRunner):
                           path=self.conf.clusterpath,
                           *args, **kwargs)
 
-    jobid_pattern = re.compile(r"Job\s+<(\d+)>\s+is\s+submitted\s+to")
+    jobid_pattern = None
+    if self.conf.clustertype == 'LSF':
+      jobid_pattern = re.compile(r"Job\s+<(\d+)>\s+is\s+submitted\s+to")
+    elif self.conf.clustertype == 'SLURM':
+      jobid_pattern = re.compile(r"Submitted batch job (\d+)")
+    else:
+      LOGGER.error("Unknown cluster type '%s'. Exiting.", self.conf.clustertype)
+      sys.exit(1)
+    
     if not self.test_mode:
       for line in pout:
         matchobj = jobid_pattern.search(line)
         if matchobj:
           jobid = int(matchobj.group(1))
-          LOGGER.info("LSF ID of submitted job: %d", jobid)
+          LOGGER.info("ID of submitted job: %d", jobid)
           return jobid
 
       raise ValueError("Unable to parse bsub output for job ID.")
@@ -647,20 +689,21 @@ class ClusterJobRunner(RemoteJobRunner):
   '''Class to run jobs via simple SSH on the cluster.'''
   
   def __init__(self, remote_wdir=None, *args, **kwargs):
-    
-    self.conf        = Config()
-    self.remote_host = self.conf.cluster
-    self.remote_port = self.conf.clusterport
-    self.remote_user = self.conf.clusteruser
-    self.remote_wdir = self.conf.clusterworkdir if remote_wdir is None else remote_wdir
+
+    conf        = Config() # self.conf is set in superclass __init__
+    self.remote_host = conf.cluster
+    self.remote_port = conf.clusterport
+    self.remote_user = conf.clusteruser
+    self.remote_wdir = conf.clusterworkdir if remote_wdir is None else remote_wdir
+
     try:
-      self.transfer_host = self.conf.transferhost
+      self.transfer_host = conf.transferhost
     except AttributeError, _err:
       # LOGGER.debug("Falling back to cluster host for transfer.")
       # self.transfer_host = self.remote_host
       self.transfer_host = None
     try:
-      self.transfer_wdir = self.conf.transferdir
+      self.transfer_wdir = conf.transferdir
     except AttributeError, _err:
       LOGGER.debug("Falling back to cluster remote directory for transfer.")
       self.transfer_wdir = self.remote_wdir
@@ -679,11 +722,11 @@ class DesktopJobSubmitter(RemoteJobRunner):
   '''
   def __init__(self, *args, **kwargs):
 
-    self.conf        = Config()
-    self.remote_host = self.conf.althost
-    self.remote_port = self.conf.althostport
-    self.remote_user = self.conf.althostuser
-    self.remote_wdir = self.conf.althostworkdir
+    conf        = Config() # self.conf is set in superclass __init__
+    self.remote_host = conf.althost
+    self.remote_port = conf.althostport
+    self.remote_user = conf.althostuser
+    self.remote_wdir = conf.althostworkdir
     self.transfer_host = self.remote_host
     self.transfer_dir  = self.remote_wdir
     
@@ -913,14 +956,15 @@ class AlignmentManager(object):
           LOGGER.info("Unlinking bam file '%s'", fname)
           os.unlink(fname)
 
-  def copy_result(self, target, fname):
+  def copy_result(self, fname, destination):
     '''
-    Copies file to target location.
+    Copies file to destination.
     '''
     qname = bash_quote(fname)
     # Scp is not efficient, replacing with rsync on low encryption
-    # cmd = "scp -p -q %s %s" % (qname, target)
-    cmd = "rsync -a -e \"ssh -o StrictHostKeyChecking=no -c arcfour\" %s %s" % (target, qname)
+    # cmd = "scp -p -q %s %s" % (qname, destination)
+    cmd = "rsync -a -e \"ssh -o StrictHostKeyChecking=no -c arcfour\" %s %s" % (qname, destination)
+    print cmd
     LOGGER.debug(cmd)
     pout = call_subprocess(cmd, shell=True,
                            tmpdir=self.conf.clusterworkdir,
@@ -932,7 +976,7 @@ class AlignmentManager(object):
     if count > 0:
       LOGGER.error("Got errors from scp, quitting.")
       sys.exit("No files transferred.")
-    flds = target.split(":")
+    flds = destination.split(":")
     if len(flds) == 2: # there's a machine and path
       fn_base = os.path.basename(qname)
       cmd = "ssh %s touch %s/%s.done" % (flds[0], flds[1], bash_quote(fn_base))
@@ -1015,8 +1059,8 @@ class AlignmentManager(object):
     # LOGGER.info("ran picard cleanup on '%s' creating '%s'", merge_fn, output_fn)
     
     if rcp_target:
-      self.copy_result(rcp_target, output_fn)
-      LOGGER.info("copied '%s' to '%s'", output_fn, rcp_target)
+      self.copy_result(output_fn, rcp_target)
+      LOGGER.info("Copied '%s' to '%s'.", output_fn, rcp_target)
 
 ##############################################################################
 
@@ -1372,6 +1416,7 @@ class BwaAlignmentManager(AlignmentManager):
       sys.exit(1)
 
     # Run npiper and clean up temporary files.
+#    cmd += " && npiper -i %s && rm %s %s %s %s %s %s" % (nfname, p1, p2, p3, nfname, quoted_fqnames, acmd)
     cmd += " && npiper -i %s && rm %s %s %s %s %s %s" % (nfname, p1, p2, p3, nfname, quoted_fqnames, acmd)
     
     LOGGER.info("Starting bwa mem on fastq files: %s", quoted_fqnames)
@@ -1546,12 +1591,7 @@ class BwaAlignmentManager(AlignmentManager):
     (job_ids, bam_files) = self.run_bwas(genome, paired, fq_files, fq_files2, output_fn, samplename)
 
     # Merge if there is more than 1 file to merge.
-    if self.split:
-      self.queue_merge(bam_files, job_ids, output_fn, rcp_target, samplename)
-    else:
-      if rcp_target:
-        self.copy_result(rcp_target, bam_fn)
-        LOGGER.info("copied '%s' to '%s'", output_fn, rcp_target)
+    self.queue_merge(bam_files, job_ids, output_fn, rcp_target, samplename)
 
 ##########################################################################
     
