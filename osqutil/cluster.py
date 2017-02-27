@@ -12,6 +12,7 @@ import logging
 import glob
 import tempfile
 import uuid
+from subprocess import Popen, PIPE
 import time
 
 from pipes import quote
@@ -134,9 +135,7 @@ class SbatchCommand(SimpleCommand):
     cmd_text = '#!/bin/bash\n'
     if jobname is not None:
       cmd_text += '#SBATCH -J %s\n' % jobname # where darwinjob is the jobname
-
     #cmd_text += '#SBATCH -A CHANGEME\n' # In university cluster paid version this argument is important! I.e. which project should be charged.
-
     # A safety net in case min or max nr of cores gets muddled up. An
     # explicit error is preferred in such cases, so that we can see
     # what to fix.
@@ -324,7 +323,8 @@ class JobRunner(object):
   See the ClusterJobSubmitter class for how this has been extended to
   submitting to a remote LSF head node.
   '''
-  __slots__ = ('test_mode', 'conf', 'command_builder')
+
+  __slots__ = ('test_mode', 'config', 'command_builder')
 
   def __init__(self, test_mode=False, command_builder=None, *args, **kwargs):
     self.test_mode = test_mode
@@ -332,8 +332,8 @@ class JobRunner(object):
       LOGGER.setLevel(logging.DEBUG)
     else:
       LOGGER.setLevel(logging.INFO)
-
-    self.conf = Config()
+      
+    self.config = Config()
 
     self.command_builder = SimpleCommand() \
         if command_builder is None else command_builder
@@ -346,8 +346,9 @@ class JobRunner(object):
       cmd = self.command_builder.build(cmd, *args, **kwargs)
       
     if path is None:
-      path = self.conf.hostpath
 
+      path = self.config.hostpath
+      
     if tmpdir is None:
       tmpdir = gettempdir()
       
@@ -377,7 +378,7 @@ class JobSubmitter(JobRunner):
     if conf.clustertype == 'SLURM':
       super(JobSubmitter, self).__init__(command_builder=SbatchCommand(),
                                          *args, **kwargs)
-    elif conf.clustertype == 'LSF':
+    elif self.conf.clustertype == 'LSF':
       super(JobSubmitter, self).__init__(command_builder=BsubCommand(),
                                          *args, **kwargs)
     else:
@@ -686,12 +687,13 @@ class ClusterJobRunner(RemoteJobRunner):
   '''Class to run jobs via simple SSH on the cluster.'''
   
   def __init__(self, remote_wdir=None, *args, **kwargs):
+    
+    self.conf        = Config()
+    self.remote_host = self.conf.cluster
+    self.remote_port = self.conf.clusterport
+    self.remote_user = self.conf.clusteruser
+    self.remote_wdir = self.conf.clusterworkdir if remote_wdir is None else remote_wdir
 
-    conf        = Config() # self.conf is set in superclass __init__
-    self.remote_host = conf.cluster
-    self.remote_port = conf.clusterport
-    self.remote_user = conf.clusteruser
-    self.remote_wdir = conf.clusterworkdir if remote_wdir is None else remote_wdir
     try:
       self.transfer_host = conf.transferhost
     except AttributeError, _err:
@@ -870,6 +872,7 @@ class AlignmentManager(object):
     jobname = bam_files[0].split("_")[0] + "bam"
 
     jobid = self._submit_lsfjob(cmd, jobname, depend, mem=12000, threads=self.threads) # Merge does not require much memory but as many cores as possible for compression is good.
+
     LOGGER.debug("got job id '%s'", jobid)
 
   def _submit_lsfjob(self, command, jobname, depend=None, sleep=0, mem=8000, threads=1):

@@ -539,6 +539,7 @@ def memoize(func):
   return wrap
 
 def write_to_remote_file(txt, remotefname, user, host, append=False, sshkey=None):
+
   a = ''
   if append:
     a = '>'
@@ -550,7 +551,7 @@ def write_to_remote_file(txt, remotefname, user, host, append=False, sshkey=None
   cmd = "%s -o StrictHostKeyChecking=no %s@%s 'cat - %s> %s'" % (sshcmd, user, host, a, remotefname)
   p = Popen(cmd, stdin=PIPE, stdout=PIPE, stderr=PIPE, shell=True)
   p.stdin.write(txt)
-
+  
   (stdout, stderr) = p.communicate()
   retcode = p.wait()
 
