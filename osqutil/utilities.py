@@ -615,10 +615,10 @@ def transfer_file(source, destination, attempts = 2, sleeptime = 2):
   
   sshflag = ''
   if ':' in source or ':' in destination:
-    sshflag = '-e \"ssh -o StrictHostKeyChecking=no\"'
-  
-  cmd = "rsync -a --owner --group %s %s %s" % (sshflag, source, destination)
+    sshflag = '-e \"ssh -o StrictHostKeyChecking=no -c arcfour\"'
 
+  cmd = "rsync -a -R --chmod=Du=rwx,Dg=r,Do=,Fu=rw,Fg=r,Fo= --chown=%s:%s %s %s %s" % (DBCONF.user, DBCONF.group, sshflag, source, destination)
+  
   a = attempts
   while a > 0:
     subproc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=True)
