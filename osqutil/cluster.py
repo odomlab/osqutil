@@ -799,10 +799,13 @@ class AlignmentManager(object):
                    tmpdir=self.conf.clusterworkdir,
                    path=self.conf.clusterpath)
 
-    # glob will try and expand [, ], ? and *; we don't actually want that.
-    # Here we quote them as per the glob docs in a character class [].
+    # glob will try and expand [, ], ? and *; we don't actually want
+    # that.  Here we quote them as per the glob docs in a character
+    # class []. We then run a second search to be sure we're getting all
+    # the files (large files split into *-zaaa and so on).
     bash_re  = re.compile(r'([?\[\]*])')
-    fq_files = glob.glob(bash_re.sub(r'[\1]', fastq_fn_suffix) + "??")
+    fq_files =  glob.glob(bash_re.sub(r'[\1]', fastq_fn_suffix) + "??")
+    fq_files += glob.glob(bash_re.sub(r'[\1]', fastq_fn_suffix) + "????")
     fq_files.sort()
     for fname in fq_files:
       LOGGER.debug("Created fastq file: '%s'", fname)
