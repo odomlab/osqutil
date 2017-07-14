@@ -238,7 +238,7 @@ class BsubCommand(SimpleCommand):
     try:
       provider = self.conf.clusterprovider
       if provider[:3].lower() == 'san' or provider[:3].lower() == 'ebi':
-        resources = ('select[mem>%d] ' % mem) + resources
+        resources = (' select[mem>%d]' % (mem)) + resources
         memreq    = '-M %d' % mem
     except AttributeError:
       pass
@@ -283,7 +283,7 @@ class BsubCommand(SimpleCommand):
       bsubcmd += " -w '%s'" % depend
 
     if sleep > 0:
-      cmd = ('sleep %d && ' % sleep) + cmd
+      cmd = ('sleep %d && ' % sleep) + cm
 
     # To group things in a pipe (allowing e.g. use of '&&'), we use a
     # subshell. Note that we quote the sh -c string once, and
