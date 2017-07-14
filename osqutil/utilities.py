@@ -538,18 +538,23 @@ def memoize(func):
     return cache[args]
   return wrap
 
-def write_to_remote_file(txt, remotefname, user, host, append=False):
+def write_to_remote_file(txt, remotefname, user, host, append=False, sshkey=None):
 
   a = ''
   if append:
     a = '>'
-  cmd = "ssh -o StrictHostKeyChecking=no %s@%s 'cat - %s> %s'" % (user, host, a, remotefname)
+
+  if sshkey is None:
+    sshcmd = 'ssh'
+  else:
+    sshcmd = 'ssh -i %s' % sshkey
+  cmd = "%s -o StrictHostKeyChecking=no %s@%s 'cat - %s> %s'" % (sshcmd, user, host, a, remotefname)
   p = Popen(cmd, stdin=PIPE, stdout=PIPE, stderr=PIPE, shell=True)
   p.stdin.write(txt)
   
   (stdout, stderr) = p.communicate()
   retcode = p.wait()
-  
+
   if retcode != 0:
     if stdout is not None:
       sys.stdout.write("STDOUT:\n")
@@ -610,10 +615,10 @@ def transfer_file(source, destination, attempts = 2, sleeptime = 2):
   
   sshflag = ''
   if ':' in source or ':' in destination:
-    sshflag = '-e \"ssh -o StrictHostKeyChecking=no\"'
-  
-  cmd = "rsync -a --owner --group %s %s %s" % (sshflag, source, destination)
+    sshflag = '-e \"ssh -o StrictHostKeyChecking=no -c arcfour\"'
 
+  cmd = "rsync -a -R --chmod=Du=rwx,Dg=r,Do=,Fu=rw,Fg=r,Fo= --chown=%s:%s %s %s %s" % (DBCONF.user, DBCONF.group, sshflag, source, destination)
+  
   a = attempts
   while a > 0:
     subproc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=True)
@@ -634,7 +639,7 @@ def transfer_file(source, destination, attempts = 2, sleeptime = 2):
   if retcode != 0:
     sys.stderr.write("Failed to transfer %s to %s in %d attempts. Exiting!\n" % (source, destination, attempts))
     sys.exit(1)
-                                
+
 class BamPostProcessor(object):
 
   __slots__ = ('input_fn', 'output_fn', 'cleaned_fn', 'rgadded_fn',
@@ -651,8 +656,8 @@ class BamPostProcessor(object):
     self.rgadded_fn  = "%s_rg.bam" % output_base
     
     # Some options are universal. Consider also adding QUIET=true, VERBOSITY=ERROR
-    self.common_args = ('VALIDATION_STRINGENCY=SILENT',
-                        'TMP_DIR=%s' % tmpdir)
+    self.common_args = ['VALIDATION_STRINGENCY=SILENT',
+                        'TMP_DIR=%s' % tmpdir]
     # In case post processing intermediate files are expected to be uncompressed add COMPRESSION_LEVEL=0
     self.compress = compress
     if not compress:
@@ -661,9 +666,9 @@ class BamPostProcessor(object):
   def clean_sam(self):
 
     # Run CleanSam
-    cmd = ('picard', 'CleanSam',
+    cmd = ['picard', 'CleanSam',
            'INPUT=%s'  % self.input_fn,
-           'OUTPUT=%s' % self.cleaned_fn) + self.common_args
+           'OUTPUT=%s' % self.cleaned_fn] + self.common_args
 
     return cmd
   
@@ -679,22 +684,22 @@ class BamPostProcessor(object):
     sample = self.samplename if self.samplename is not None else libcode
 
     # Run AddOrReplaceReadGroups
-    cmd = ('picard', 'AddOrReplaceReadGroups',
+    cmd = ['picard', 'AddOrReplaceReadGroups',
            'INPUT=%s'  % self.cleaned_fn,
            'OUTPUT=%s' % self.rgadded_fn,
            'RGLB=%s'   % libcode,
            'RGSM=%s'   % sample,
            'RGCN=%s'   % facility,
            'RGPU=%d'   % int(lanenum),
-           'RGPL=illumina') + self.common_args
+           'RGPL=illumina'] + self.common_args
 
     return cmd
 
   def fix_mate_information(self):
 
     # Run FixMateInformation
-    cmd = ('picard', 'FixMateInformation',
+    cmd = ['picard', 'FixMateInformation',
            'INPUT=%s'  % self.rgadded_fn,
-           'OUTPUT=%s' % self.output_fn) + self.common_args
-      
+           'OUTPUT=%s' % self.output_fn] + self.common_args
+
     return cmd
