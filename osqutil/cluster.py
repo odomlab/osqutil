@@ -321,7 +321,7 @@ class JobRunner(object):
   See the ClusterJobSubmitter class for how this has been extended to
   submitting to a remote LSF head node.
   '''
-  __slots__ = ('test_mode', 'config', 'command_builder')
+  __slots__ = ('test_mode', 'conf', 'command_builder')
 
   def __init__(self, test_mode=False, command_builder=None, *args, **kwargs):
     self.test_mode = test_mode
