@@ -322,6 +322,7 @@ class JobRunner(object):
   submitting to a remote LSF head node.
   '''
   __slots__ = ('test_mode', 'config', 'command_builder')
+
   def __init__(self, test_mode=False, command_builder=None, *args, **kwargs):
     self.test_mode = test_mode
     if test_mode:
@@ -330,7 +331,7 @@ class JobRunner(object):
       LOGGER.setLevel(logging.INFO)
       
     self.conf = Config()
-    
+
     self.command_builder = SimpleCommand() \
         if command_builder is None else command_builder
 
@@ -687,6 +688,7 @@ class ClusterJobRunner(RemoteJobRunner):
     self.remote_port = conf.clusterport
     self.remote_user = conf.clusteruser
     self.remote_wdir = conf.clusterworkdir if remote_wdir is None else remote_wdir
+
     try:
       self.transfer_host = conf.transferhost
     except AttributeError, _err:
