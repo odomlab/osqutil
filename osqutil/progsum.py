@@ -120,6 +120,9 @@ class ProgramSummary(object):
     if os.path.isdir(pdir):
       return pdir
 
+    elif pdir == '': # executable is in current working directory
+      return '.'
+
     else:
       LOGGER.error("Path for program %s can not be found!", program)
       sys.exit("Error: Path for program %s can not be found!" % program)

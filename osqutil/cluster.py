@@ -143,9 +143,8 @@ class SbatchCommand(SimpleCommand):
     if mincpus > maxcpus:
       maxcpus = mincpus
       LOGGER.info("mincpus (%d) is greater than maxcpus (%d). Maxcpus was made equal to mincpus!" % (mincpus, maxcpus))
-
-    cmd_text += '#SBATCH --nodes=%d-%d\n' % (mincpus, maxcpus) # how many whole nodes (cores) should be allocated
     cmd_text += '#SBATCH -N 1\n' # Make sure that all cores are in one node
+    cmd_text += '#SBATCH --mincpus=%d\n' % mincpus # Specify the number of CPU cores we need. Using --ntasks 1 and --cpus-per-task=mincpus should do the same job.
     cmd_text += '#SBATCH --mail-type=NONE\n' # never receive mail
     if queue is None:
       cmd_text += '#SBATCH -p %s\n' % self.conf.clusterqueue # Queue where the job is sent.
@@ -818,10 +817,13 @@ class AlignmentManager(object):
                     tmpdir=self.conf.clusterworkdir,
                     path=self.conf.clusterpath)
 
-    # glob will try and expand [, ], ? and *; we don't actually want that.
-    # Here we quote them as per the glob docs in a character class [].
+    # glob will try and expand [, ], ? and *; we don't actually want
+    # that.  Here we quote them as per the glob docs in a character
+    # class []. We then run a second search to be sure we're getting all
+    # the files (large files split into *-zaaa and so on).
     bash_re  = re.compile(r'([?\[\]*])')
-    fq_files = glob.glob(bash_re.sub(r'[\1]', fastq_fn_suffix) + "??")
+    fq_files =  glob.glob(bash_re.sub(r'[\1]', fastq_fn_suffix) + "??")
+    fq_files += glob.glob(bash_re.sub(r'[\1]', fastq_fn_suffix) + "????")
     fq_files.sort()
     for fname in fq_files:
       LOGGER.debug("Created fastq file: '%s'", fname)
