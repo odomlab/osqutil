@@ -590,21 +590,24 @@ class RemoteJobRunner(JobRunner):
     # Copy the files across.
     self.remote_copy_files(filenames, destnames)
 
-    # Next, call uncompress any files which need it.
-    uncomp_names = []
-    for num in range(len(destnames)):
-      
-      # We have to test the file we copied over, since we'll be
-      # reading its header.
-      if is_zipped(filenames[num]):
-        uncomp = self.remote_uncompress_file(destnames[num], zipcommand='gzip')
-      elif is_bzipped(filenames[num]):
-        uncomp = self.remote_uncompress_file(destnames[num], zipcommand='bzip2')
-      else:
-        uncomp = os.path.join(self.remote_wdir, destnames[num])
-      uncomp_names.append(uncomp)
-
-    return uncomp_names
+    # Following is not needed any more as the pipeline works fine on copressed files. Uncompression is done on fly during alignment.
+    return destnames
+    
+#    # Next, call uncompress any files which need it.
+#    uncomp_names = []
+#    for num in range(len(destnames)):
+#      
+#      # We have to test the file we copied over, since we'll be
+#      # reading its header.
+#      if is_zipped(filenames[num]):
+#        uncomp = self.remote_uncompress_file(destnames[num], zipcommand='gzip')
+#      elif is_bzipped(filenames[num]):
+#        uncomp = self.remote_uncompress_file(destnames[num], zipcommand='bzip2')
+#      else:
+#        uncomp = os.path.join(self.remote_wdir, destnames[num])
+#      uncomp_names.append(uncomp)
+#
+#    return uncomp_names
   
   def submit(self, *args, **kwargs):
     '''
