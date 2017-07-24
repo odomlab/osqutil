@@ -590,8 +590,13 @@ class RemoteJobRunner(JobRunner):
     # Copy the files across.
     self.remote_copy_files(filenames, destnames)
 
-    # Following is not needed any more as the pipeline works fine on copressed files. Uncompression is done on fly during alignment.
-    return destnames
+    # Following uncompressing is not needed any more as the pipeline works on compressed files.
+    # However, we need to provide names with full remote path.
+    remote_names = []
+    for destname in destnames:
+       rname = os.path.join(self.remote_wdir, destname)
+       remote_names.append(rname)
+    return remote_names
     
 #    # Next, call uncompress any files which need it.
 #    uncomp_names = []
