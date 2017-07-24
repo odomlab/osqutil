@@ -333,6 +333,8 @@ class JobRunner(object):
       LOGGER.setLevel(logging.INFO)
       
     self.config = Config()
+    self.conf = Config() # There seems to be some untidiness of self.conf and self.config. In few places in in subclasses self.conf is being accessed rather than self.config.
+                         # This needs to be cleaned. For now as a quick fix, adding self.conf as well. (lukk01 2017-07-17).
 
     self.command_builder = SimpleCommand() \
         if command_builder is None else command_builder
@@ -377,7 +379,7 @@ class JobSubmitter(JobRunner):
     if conf.clustertype == 'SLURM':
       super(JobSubmitter, self).__init__(command_builder=SbatchCommand(),
                                          *args, **kwargs)
-    elif self.conf.clustertype == 'LSF':
+    elif conf.clustertype == 'LSF':
       super(JobSubmitter, self).__init__(command_builder=BsubCommand(),
                                          *args, **kwargs)
     else:
@@ -396,12 +398,12 @@ class JobSubmitter(JobRunner):
 
     # FIXME this could be farmed out to utilities?
     jobid_pattern = None
-    if self.conf.clustertype == 'LSF':
+    if self.config.clustertype == 'LSF':
       jobid_pattern = re.compile(r"Job\s+<(\d+)>\s+is\s+submitted\s+to")
-    elif self.conf.clustertype == 'SLURM':
+    elif self.config.clustertype == 'SLURM':
       jobid_pattern = re.compile(r"Submitted batch job (\d+)")
     else:
-      LOGGER.error("Unknown cluster type '%s'. Exiting.", self.conf.clustertype)
+      LOGGER.error("Unknown cluster type '%s'. Exiting.", self.config.clustertype)
       sys.exit(1)
 
     for line in pout:
@@ -478,7 +480,7 @@ class RemoteJobRunner(JobRunner):
               re.sub(r'"', r'\"', cmd)))
     LOGGER.debug(cmd)
     if not self.test_mode:
-      return call_subprocess(cmd, shell=True, path=self.conf.hostpath)
+      return call_subprocess(cmd, shell=True, path=self.config.hostpath)
     return None
 
   def find_remote_executable(self, progname, path=None):
@@ -622,7 +624,7 @@ class ClusterJobSubmitter(RemoteJobRunner):
 
   def __init__(self, remote_wdir=None, *args, **kwargs):
 
-    conf        = Config() # self.conf is set in superclass __init__
+    conf = Config() # self.conf is set in superclass __init__
     self.remote_host = conf.cluster
     self.remote_port = conf.clusterport
     self.remote_user = conf.clusteruser
@@ -694,13 +696,13 @@ class ClusterJobRunner(RemoteJobRunner):
     self.remote_wdir = self.conf.clusterworkdir if remote_wdir is None else remote_wdir
 
     try:
-      self.transfer_host = conf.transferhost
+      self.transfer_host = self.conf.transferhost
     except AttributeError, _err:
       # LOGGER.debug("Falling back to cluster host for transfer.")
       # self.transfer_host = self.remote_host
       self.transfer_host = None
     try:
-      self.transfer_wdir = conf.transferdir
+      self.transfer_wdir = self.conf.transferdir
     except AttributeError, _err:
       LOGGER.debug("Falling back to cluster remote directory for transfer.")
       self.transfer_wdir = self.remote_wdir

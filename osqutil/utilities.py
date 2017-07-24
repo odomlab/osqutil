@@ -617,7 +617,9 @@ def transfer_file(source, destination, attempts = 2, sleeptime = 2):
   if ':' in source or ':' in destination:
     sshflag = '-e \"ssh -o StrictHostKeyChecking=no -c arcfour\"'
 
-  cmd = "rsync -a -R --chmod=Du=rwx,Dg=r,Do=,Fu=rw,Fg=r,Fo= --chown=%s:%s %s %s %s" % (DBCONF.user, DBCONF.group, sshflag, source, destination)
+  # cmd used to have -R option as well, not sure why it was included. Removed by lukk01 24/07
+  cmd = "rsync -a --chmod=Du=rwx,Dg=r,Do=,Fu=rw,Fg=r,Fo= --chown=%s:%s %s %s %s" % (DBCONF.user, DBCONF.group, sshflag, source, destination)
+  LOGGER.info(cmd)
   
   a = attempts
   while a > 0:
@@ -637,7 +639,7 @@ def transfer_file(source, destination, attempts = 2, sleeptime = 2):
         break
       time.sleep(sleeptime)
   if retcode != 0:
-    sys.stderr.write("Failed to transfer %s to %s in %d attempts. Exiting!\n" % (source, destination, attempts))
+    LOGGER.error("Failed to transfer %s to %s in %d attempts. Exiting!\n", source, destination, attempts)
     sys.exit(1)
 
 class BamPostProcessor(object):
