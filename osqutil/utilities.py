@@ -619,7 +619,7 @@ def transfer_file(source, destination, attempts = 2, sleeptime = 2):
 
   # cmd used to have -R option as well, not sure why it was included. Removed by lukk01 24/07
   cmd = "rsync -a --chmod=Du=rwx,Dg=r,Do=,Fu=rw,Fg=r,Fo= --chown=%s:%s %s %s %s" % (DBCONF.user, DBCONF.group, sshflag, source, destination)
-  LOGGER.info(cmd)
+  LOGGER.debug(cmd)
   
   a = attempts
   while a > 0:
