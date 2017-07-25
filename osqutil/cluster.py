@@ -1139,11 +1139,11 @@ class BwaAlignmentManager(AlignmentManager):
         p012 = "%s_p012" % fqname
         p021 = "%s_p021" % fqname2
         p022 = "%s_p022" % fqname2
-        cmd = "mknod %s p && mknod %s p && mknod %s p && mknod %s p && sleep 1 && " % (p011, p012, p021, p022)
-        ncommands = "zcat %s > %s\n" % (bash_quote(fqname), p011)
-        ncommands = "zcat %s > %s\n" % (bash_quote(fqname), p012)
-        ncommands = "zcat %s > %s\n" % (bash_quote(fqname2), p021)
-        ncommands = "zcat %s > %s\n" % (bash_quote(fqname2), p022)
+        cmd += "mknod %s p && mknod %s p && mknod %s p && mknod %s p && sleep 1 && " % (p011, p012, p021, p022)
+        ncommands += "zcat %s > %s\n" % (bash_quote(fqname), p011)
+        ncommands += "zcat %s > %s\n" % (bash_quote(fqname), p012)
+        ncommands += "zcat %s > %s\n" % (bash_quote(fqname2), p021)
+        ncommands += "zcat %s > %s\n" % (bash_quote(fqname2), p022)
         acmd = "&& rm %s %s %s %s" % (p011, p012, p021, p022)
         quoted_fqnames = [p011, p021, p012, p022]
       if fqname.endswith('.bz2'):
@@ -1151,11 +1151,11 @@ class BwaAlignmentManager(AlignmentManager):
         p012 = "%s_p012" % fqname
         p021 = "%s_p021" % fqname2
         p022 = "%s_p022" % fqname2
-        cmd = "mknod %s p && mknod %s p && mknod %s p && mknod %s p && sleep 1 && " % (p011, p012, p021, p022)
-        ncommands = "pzcat %s > %s\n" % (bash_quote(fqname), p011)
-        ncommands = "pzcat %s > %s\n" % (bash_quote(fqname), p012)
-        ncommands = "pzcat %s > %s\n" % (bash_quote(fqname2), p021)
-        ncommands = "pzcat %s > %s\n" % (bash_quote(fqname2), p022)
+        cmd += "mknod %s p && mknod %s p && mknod %s p && mknod %s p && sleep 1 && " % (p011, p012, p021, p022)
+        ncommands += "pzcat %s > %s\n" % (bash_quote(fqname), p011)
+        ncommands += "pzcat %s > %s\n" % (bash_quote(fqname), p012)
+        ncommands += "pzcat %s > %s\n" % (bash_quote(fqname2), p021)
+        ncommands += "pzcat %s > %s\n" % (bash_quote(fqname2), p022)
         acmd = "&& rm %s %s %s %s" % (p011, p012, p021, p022)
         quoted_fqnames = [p011, p021, p012, p022]
       
@@ -1180,7 +1180,7 @@ class BwaAlignmentManager(AlignmentManager):
     cmd3 = "mknod %s p && mknod %s p && mknod %s p && sleep 1" % (p1, p2, p3)
     
     # Run bwa sampe
-    ncommands  = ("%s sampe %s %s %s %s %s %s"
+    ncommands += ("%s sampe %s %s %s %s %s %s"
              % (self.bwa_prog, self.nocc, genome, bash_quote(sai_file1),
                 bash_quote(sai_file2), quoted_fqnames[2], quoted_fqnames[3]))
 
@@ -1258,16 +1258,16 @@ class BwaAlignmentManager(AlignmentManager):
         p01 = "%s_p01" % fqname
         p02 = "%s_p02" % fqname
         cmd = "mknod %s p && mknod %s p && sleep 1 && " % (p01, p02)
-        ncommands = "zcat %s > %s\n" % (bash_quote(fqname), p01)
-        ncommands = "zcat %s > %s\n" % (bash_quote(fqname), p02)
+        ncommands += "zcat %s > %s\n" % (bash_quote(fqname), p01)
+        ncommands += "zcat %s > %s\n" % (bash_quote(fqname), p02)
         acmd = "&& rm %s %s" % (p01, p02)
         quoted_fqname = [p01, p02]
       if fqname.endswith('.bz2'):
         p01 = "%s_p01" % fqname
         p02 = "%s_p02" % fqname
         cmd = "mknod %s p && mknod %s p && sleep 1 && " % (p01, p02)
-        ncommands = "bzcat %s > %s\n" % (bash_quote(fqname), p01)
-        ncommands = "bzcat %s > %s\n" % (bash_quote(fqname), p02)
+        ncommands += "bzcat %s > %s\n" % (bash_quote(fqname), p01)
+        ncommands += "bzcat %s > %s\n" % (bash_quote(fqname), p02)
         acmd = "&& rm %s %s" % (p01, p02)
       quoted_fqname = [p01, p02]
 
@@ -1284,7 +1284,7 @@ class BwaAlignmentManager(AlignmentManager):
     cmd += "mknod %s p && mknod %s p && mknod %s p && sleep 1" % (p1, p2, p3)
     
     # Run bwa aln
-    ncommands = ("%s aln -t %d %s %s %s" % (self.bwa_prog, self.threads, readgroup, genome, quoted_fqname[0]))
+    ncommands += ("%s aln -t %d %s %s %s" % (self.bwa_prog, self.threads, readgroup, genome, quoted_fqname[0]))
 
     # Run bwa samse
     ncommands += (" | %s samse %s %s - %s" % (self.bwa_prog, self.nocc,
