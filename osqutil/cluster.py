@@ -1387,9 +1387,9 @@ class BwaAlignmentManager(AlignmentManager):
     picard_common_args = ('VALIDATION_STRINGENCY=SILENT', 'COMPRESSION_LEVEL=0')
           
     # Create named pipes for running commands in npiper
-    p1 = "%s_p01" % fqnames[0]
-    p2 = "%s_p02" % fqnames[0]
-    p3 = "%s_p03" % fqnames[0]
+    p1 = "%s_p1" % fqnames[0]
+    p2 = "%s_p2" % fqnames[0]
+    p3 = "%s_p3" % fqnames[0]
 
     cmd += "mknod %s p && mknod %s p && mknod %s p && sleep 1" % (p1, p2, p3)
 
