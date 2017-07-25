@@ -1277,11 +1277,11 @@ class BwaAlignmentManager(AlignmentManager):
     picard_common_args = ('VALIDATION_STRINGENCY=SILENT', 'COMPRESSION_LEVEL=0')
     
     # Create named pipes for running commands in npiper
-    p1 = "%s_p01" % fqname
-    p2 = "%s_p02" % fqname
-    p3 = "%s_p03" % fqname
+    p1 = "%s_p1" % fqname
+    p2 = "%s_p2" % fqname
+    p3 = "%s_p3" % fqname
 
-    cmd = "mknod %s p && mknod %s p && mknod %s p && sleep 1" % (p1, p2, p3)
+    cmd += "mknod %s p && mknod %s p && mknod %s p && sleep 1" % (p1, p2, p3)
     
     # Run bwa aln
     ncommands = ("%s aln -t %d %s %s %s" % (self.bwa_prog, self.threads, readgroup, genome, quoted_fqname[0]))
