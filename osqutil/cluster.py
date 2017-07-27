@@ -871,7 +871,7 @@ class AlignmentManager(object):
     jobid = self._submit_lsfjob(cmd, jobname, depend, mem=12000)
     LOGGER.debug("got job id '%s'", jobid)
 
-  def _submit_lsfjob(self, command, jobname, depend=None, sleep=0, mem=8000, threads=1):
+  def _submit_lsfjob(self, command, jobname, depend=None, sleep=0, mem=12000, threads=1):
     '''
     Executes command in LSF cluster.
     '''
