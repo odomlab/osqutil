@@ -91,7 +91,7 @@ class SbatchCommand(SimpleCommand):
   Class used to build sbatch-wrapped command.
   '''
 
-  def build(self, cmd, mem=2000, queue=None, jobname=None,
+  def build(self, cmd, mem=2000, time_limit=48, queue=None, jobname=None,
             auto_requeue=False, depend_jobs=None, sleep=0,
             mincpus=1, maxcpus=1, clusterlogdir=None, environ=None, *args, **kwargs):
     # The environ argument allows the caller to pass in arbitrary
@@ -151,7 +151,7 @@ class SbatchCommand(SimpleCommand):
     else:
       cmd_text += '#SBATCH --no-requeue\n' # do not requeue the job
     cmd_text += '#SBATCH --mem %s\n' % mem # memory in MB
-    # cmd_text += '#SBATCH -t 0-%s\n' % time_limit # Note that time_limit is a string in format of hh:mm
+    cmd_text += '#SBATCH -t %d:0:0\n' % time_limit # Note that time_limit is an integer indicating hours.
     cmd_text += '#SBATCH -o %s/%%j.stdout\n' % clusterlogdir # File to which STDOUT will be written
     cmd_text += '#SBATCH -e %s/%%j.stderr\n' % clusterlogdir # File to which STDERR will be written
     if depend_jobs is not None:
