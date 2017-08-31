@@ -413,6 +413,12 @@ if __name__ == '__main__':
 
   PARSER.add_argument('--identity-file', dest='identity', type=str, default=None,
                       help='A file from which the identity (private key) for public key authentication is read. (default: None)')
+
+  PARSER.add_argument('--local_ssh_port', dest='local_ssh_port', type=int, default=None,
+                      help='ssh port in local host for entering the tunnel (default: %d).' % LOCAL_SSH_PORT)
+
+  PARSER.add_argument('--remote_ssh_port', dest='remote_ssh_port', type=int, default=None,
+                      help='ssh port in remote server for reverse tunnel entry back to local host (default: %d).' % REMOTE_SSH_PORT)
   
   PARSER.add_argument('--remote-host', dest='remote', type=str,
                       default='seq3b.internal.sanger.ac.uk',
@@ -431,6 +437,12 @@ if __name__ == '__main__':
 
   ARGS = PARSER.parse_args()
 
+  if ARGS.local_ssh_port:  
+    LOCAL_SSH_PORT = ARGS.local_ssh_port
+
+  if ARGS.remote_ssh_port:
+    REMOTE_SSH_PORT = ARGS.remote_ssh_port
+    
   if ARGS.revpoll:
     # Speciality run mode called by the TwoWayTunnel class to monitor
     # the reverse tunnel.

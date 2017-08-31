@@ -50,15 +50,18 @@ if __name__ == '__main__':
   PARSER.add_argument('--rcp', type=str, dest='rcp',
                       help='Remote file copy (rcp) target.')
 
+  PARSER.add_argument('--debug', dest='debug', action='store_true',
+                      help='Switch the debugging info on.')
+  
   PARSER.add_argument('--cleanup', dest='cleanup', action='store_true',
                       help='Delete all temporary files.')
 
+  PARSER.add_argument('--postprocess', dest='postprocess', action='store_true',
+                      help='Run picard based post process after bam merge.')
+  
   PARSER.add_argument('--group', type=str, dest='group',
                       help='The user group for the files.')
-
-  PARSER.add_argument('-d', '--debug', dest='debug', action='store_true',
-                      help='Turn on debugging output.')
-
+  
   ARGS = PARSER.parse_args()
 
   # We allow the default bwa algorithm to be set here, since it does
@@ -71,6 +74,6 @@ if __name__ == '__main__':
   BSUB.merge_alignments(input_fns  = ARGS.infiles,
                         output_fn  = ARGS.outfile,
                         rcp_target = ARGS.rcp,
-                        samplename = ARGS.sample)
-
+                        samplename = ARGS.sample,
+                        postprocess= ARGS.postprocess)
   
