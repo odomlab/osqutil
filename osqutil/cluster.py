@@ -625,9 +625,8 @@ class ClusterJobSubmitter(RemoteJobRunner):
     try:
       self.transfer_host = conf.transferhost
     except AttributeError, _err:
-      # LOGGER.debug("Falling back to cluster host for transfer.")
-      # self.transfer_host = self.remote_host
-      self.transfer_host = None
+      LOGGER.debug("Falling back to cluster host for transfer.")
+      self.transfer_host = self.remote_host
     try:
       self.transfer_wdir = conf.transferdir
     except AttributeError, _err:
@@ -692,9 +691,8 @@ class ClusterJobRunner(RemoteJobRunner):
     try:
       self.transfer_host = conf.transferhost
     except AttributeError, _err:
-      # LOGGER.debug("Falling back to cluster host for transfer.")
-      # self.transfer_host = self.remote_host
-      self.transfer_host = None
+      LOGGER.debug("Falling back to cluster host for transfer.")
+      self.transfer_host = self.remote_host
     try:
       self.transfer_wdir = conf.transferdir
     except AttributeError, _err:
