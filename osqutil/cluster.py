@@ -96,7 +96,7 @@ class SbatchCommand(SimpleCommand):
   Class used to build sbatch-wrapped command.
   '''
 
-  def build(self, cmd, mem=2000, queue=None, jobname=None,
+  def build(self, cmd, mem=2000, time_limit=48, queue=None, jobname=None,
             auto_requeue=False, depend_jobs=None, sleep=0,
             mincpus=1, maxcpus=1, clusterlogdir=None, environ=None, *args, **kwargs):
     # The environ argument allows the caller to pass in arbitrary
@@ -155,7 +155,7 @@ class SbatchCommand(SimpleCommand):
     else:
       cmd_text += '#SBATCH --no-requeue\n' # do not requeue the job
     cmd_text += '#SBATCH --mem %s\n' % mem # memory in MB
-    # cmd_text += '#SBATCH -t 0-%s\n' % time_limit # Note that time_limit is a string in format of hh:mm
+    cmd_text += '#SBATCH -t %d:0:0\n' % time_limit # Note that time_limit is an integer indicating hours.
     cmd_text += '#SBATCH -o %s/%%j.stdout\n' % clusterlogdir # File to which STDOUT will be written
     cmd_text += '#SBATCH -e %s/%%j.stderr\n' % clusterlogdir # File to which STDERR will be written
     if depend_jobs is not None:
@@ -323,7 +323,7 @@ class JobRunner(object):
   submitting to a remote LSF head node.
   '''
 
-  __slots__ = ('test_mode', 'config', 'command_builder')
+  __slots__ = ('test_mode', 'conf', 'command_builder')
 
   def __init__(self, test_mode=False, command_builder=None, *args, **kwargs):
     self.test_mode = test_mode
@@ -331,7 +331,7 @@ class JobRunner(object):
       LOGGER.setLevel(logging.DEBUG)
     else:
       LOGGER.setLevel(logging.INFO)
-      
+
     self.config = Config()
     self.conf = Config() # There seems to be some untidiness of self.conf and self.config. In few places in in subclasses self.conf is being accessed rather than self.config.
                          # This needs to be cleaned. For now as a quick fix, adding self.conf as well. (lukk01 2017-07-17).
@@ -347,8 +347,7 @@ class JobRunner(object):
       cmd = self.command_builder.build(cmd, *args, **kwargs)
       
     if path is None:
-
-      path = self.config.hostpath
+      path = self.conf.hostpath
       
     if tmpdir is None:
       tmpdir = gettempdir()
@@ -640,9 +639,8 @@ class ClusterJobSubmitter(RemoteJobRunner):
     try:
       self.transfer_host = conf.transferhost
     except AttributeError, _err:
-      # LOGGER.debug("Falling back to cluster host for transfer.")
-      # self.transfer_host = self.remote_host
-      self.transfer_host = None
+      LOGGER.debug("Falling back to cluster host for transfer.")
+      self.transfer_host = self.remote_host
     try:
       self.transfer_wdir = conf.transferdir
     except AttributeError, _err:
@@ -696,19 +694,18 @@ class ClusterJobRunner(RemoteJobRunner):
   '''Class to run jobs via simple SSH on the cluster.'''
   
   def __init__(self, remote_wdir=None, *args, **kwargs):
-    
-    self.conf        = Config()
-    self.remote_host = self.conf.cluster
-    self.remote_port = self.conf.clusterport
-    self.remote_user = self.conf.clusteruser
-    self.remote_wdir = self.conf.clusterworkdir if remote_wdir is None else remote_wdir
+
+    conf        = Config() # self.conf is set in superclass __init__
+    self.remote_host = conf.cluster
+    self.remote_port = conf.clusterport
+    self.remote_user = conf.clusteruser
+    self.remote_wdir = conf.clusterworkdir if remote_wdir is None else remote_wdir
 
     try:
       self.transfer_host = self.conf.transferhost
     except AttributeError, _err:
-      # LOGGER.debug("Falling back to cluster host for transfer.")
-      # self.transfer_host = self.remote_host
-      self.transfer_host = None
+      LOGGER.debug("Falling back to cluster host for transfer.")
+      self.transfer_host = self.remote_host
     try:
       self.transfer_wdir = self.conf.transferdir
     except AttributeError, _err:
@@ -887,7 +884,7 @@ class AlignmentManager(object):
 
     LOGGER.debug("got job id '%s'", jobid)
 
-  def _submit_lsfjob(self, command, jobname, depend=None, sleep=0, mem=8000, threads=1):
+  def _submit_lsfjob(self, command, jobname, depend=None, sleep=0, mem=12000, threads=1):
     '''
     Executes command in LSF cluster.
     '''
