@@ -615,7 +615,7 @@ def transfer_file(source, destination, attempts = 2, sleeptime = 2):
   
   sshflag = ''
   if ':' in source or ':' in destination:
-    sshflag = '-e \"ssh -o StrictHostKeyChecking=no -c arcfour\"'
+    sshflag = '-e \"ssh -o StrictHostKeyChecking=no -c aes128-cbc\"'
 
   # cmd used to have -R option as well, not sure why it was included. Removed by lukk01 24/07
   cmd = "rsync -a --chmod=Du=rwx,Dg=r,Do=,Fu=rw,Fg=r,Fo= --chown=%s:%s %s %s %s" % (DBCONF.user, DBCONF.group, sshflag, source, destination)

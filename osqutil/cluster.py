@@ -780,6 +780,9 @@ class AlignmentManager(object):
     self.cleanup       = cleanup
     self.group         = group
     self.debug         = debug    
+
+    if self.merge_prog is None:
+      self.merge_prog = 'cs_runBwaWithSplit_Merge.py'
     
     self._configure_logging(self.__class__.__name__, LOGGER)
     LOGGER.setLevel(loglevel)
@@ -971,7 +974,7 @@ class AlignmentManager(object):
     qname = bash_quote(fname)
     # Scp is not efficient, replacing with rsync on low encryption
     # cmd = "scp -p -q %s %s" % (qname, destination)
-    cmd = "rsync -a -e \"ssh -o StrictHostKeyChecking=no -c arcfour\" %s %s" % (qname, destination)
+    cmd = "rsync -a -e \"ssh -o StrictHostKeyChecking=no -c aes128-cbc\" %s %s" % (qname, destination)
     print cmd
     LOGGER.debug(cmd)
     pout = call_subprocess(cmd, shell=True,
@@ -979,15 +982,15 @@ class AlignmentManager(object):
                            path=self.conf.clusterpath)
     count = 0
     for line in pout:
-      LOGGER.warn("SCP: %s", line[:-1])
+      LOGGER.warn("rsync: %s", line[:-1])
       count += 1
     if count > 0:
-      LOGGER.error("Got errors from scp, quitting.")
+      LOGGER.error("Got errors from rsync, quitting.")
       sys.exit("No files transferred.")
     flds = destination.split(":")
     if len(flds) == 2: # there's a machine and path
       fn_base = os.path.basename(qname)
-      cmd = "ssh %s touch %s/%s.done" % (flds[0], flds[1], bash_quote(fn_base))
+      cmd = "ssh -o StrictHostKeyChecking=no %s touch %s/%s.done" % (flds[0], flds[1], bash_quote(fn_base))
       LOGGER.debug(cmd)
       call_subprocess(cmd, shell=True,
                       tmpdir=self.conf.clusterworkdir,
@@ -1499,9 +1502,9 @@ class BwaAlignmentManager(AlignmentManager):
     except AttributeError, _err:
       transferhost = None
     if transferhost is not None:
-      cmd = "ssh %s@%s \"rsync -a -e \\\"ssh -o StrictHostKeyChecking=no -c arcfour\\\" %s@%s:%s %s\"" % (self.conf.clusteruser, transferhost, self.conf.clusteruser, host, bash_quote(fn), os.path.join(self.conf.clusterworkdir, bash_quote(fname)) )
+      cmd = "ssh %s@%s \"rsync -a -e \\\"ssh -o StrictHostKeyChecking=no -c aes128-cbc\\\" %s@%s:%s %s\"" % (self.conf.clusteruser, transferhost, self.conf.clusteruser, host, bash_quote(fn), os.path.join(self.conf.clusterworkdir, bash_quote(fname)) )
     else:
-      cmd = "rsync -a -e \"ssh -o StrictHostKeyChecking=no -c arcfour\" %s@%s:%s %s" % (self.conf.clusteruser, host, bash_quote(fn), bash_quote(fname) )
+      cmd = "rsync -a -e \"ssh -o StrictHostKeyChecking=no -c aes128-cbc\" %s@%s:%s %s" % (self.conf.clusteruser, host, bash_quote(fn), bash_quote(fname) )
 
     LOGGER.info("Downloading %s" % (fname))
     
@@ -1569,7 +1572,9 @@ class BwaAlignmentManager(AlignmentManager):
     else:
       LOGGER.error("Too many files specified.")
       sys.exit("Unexpected number of files passed to script.")
-        
+
+    ## Margus (04.10.2017): Not sure if following if/else statement for output_fn filename creation is need. Looks suspicious as the output_fn for rcp case seems to contain
+    ## directory in remote host which can not be right!
     # Construct output_fn
     bam_fn = "%s.bam" % make_bam_name_without_extension(local_files[0])
     if lcp_target is not None:
@@ -1587,17 +1592,18 @@ class BwaAlignmentManager(AlignmentManager):
       else:
         LOGGER.warn("Neither lcp (%s) nor rcp (%s) has been defined. Leaving %s in cluster.", lcp_target, rcp_target, bam_fn)
         output_fn = make_bam_name_without_extension(local_files[0])
-    LOGGER.info("Saving mapping output to %s", output_fn)
 
     # In case only one file, run_bwas should create bam with its final name.
     if len(fq_files) == 1:
       output_fn = bam_fn
       LOGGER.warning("No splits detected. Setting output file to %s", bam_fn)
       self.split=False
+    LOGGER.info("Saving mapping output to %s", output_fn)
 
     # Run bwa mapping jobs for each (pair of) file(s)
     (job_ids, bam_files) = self.run_bwas(genome, paired, fq_files, fq_files2, output_fn, samplename)
 
+    LOGGER.info("Initiating merge/data transfer job for %s ...", output_fn)
     # Merge if there is more than 1 file to merge.
     self.queue_merge(bam_files, job_ids, output_fn, rcp_target, samplename)
 
