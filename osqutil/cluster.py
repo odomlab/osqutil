@@ -1701,4 +1701,145 @@ class TophatAlignmentManager(AlignmentManager):
     self.queue_merge(bam_files, job_ids, bam_fn, rcp_target, samplename)
 
 
+##########################################################################
+    
+class StarAlignmentManager(AlignmentManager):
+  '''
+  Subclass of AlignmentManager implementing the STAR-specific
+  components of our primary alignment pipeline.
+  '''
+  def __init__(self, *args, **kwargs):
+    super(StarAlignmentManager, self).__init__(*args, **kwargs)
+
+    # These are now identified by passing in self.conf.clusterpath to
+    # the remote command.
+    self.star_prog   = 'STAR'
+     
+  def run_star(self, genome, paired, fq_files, fq_files2, output_fn):
+    '''
+    Submits STAR alignment jobs for list of fq files to cluster.
+    '''
+    job_ids = []
+    out_names = []
+    current = 0
+
+    ## Tophat requires the trailing .fa to be removed.
+    ## genome = re.sub(r'\.fa$', '', genome)
+
+    for fqname in fq_files:
+      (donumber, facility, lanenum, _pipe) = parse_repository_filename(fqname)
+
+      # Used as a job ID and also as an output directory, so we want
+      # it fairly collision-resistant.
+      jobname_bam = "%s_STAR" % fqname
+
+      out = bash_quote(fqname + ".bam")
+      out_names.append(out)
+
+      # Run STAR.
+      cmd = ("%s --runMode alignReads --runThreadN %d --genomeDir %s --readFilesCommand --outFilterScoreMinOverLread 0.4 --outFilterMatchNminOverLread 0.4 --readFilesIn --outFileNamePrefix %s") % (self.star_prog, self.threads, genome, out)
+      if fqname.endswith('gz'):
+        cmd += " zcat --outSAMtype BAM SortedByCoordinate"
+      if paired:        
+        cmd += " --outSAMunmapped Within KeepPairs %s %s" % (bash_quote(fqname),bash_quote(fq_files2[current]))
+      else:
+        cmd += " --outSAMunmapped Within %s" % bash_quote(fqname)
+      # Another option to consider: --outTmpDir
+
+      # Merge the mapped and unmapped outputs, clean out unwanted
+      # secondary alignments. Note, STAR sort the output bams by default.
+      strippedbam = "%sAligned.sortedByCoord.out.bam" % out
+
+      cmd += (" && %s view -@ %d -b -F 0x100 -o %s %s"
+              % (self.samtools_prog, self.threads, strippedbam, output_fn))
+
+      # Clean up      
+      cmd += (" && rm -r %s %s %s %s %s" % (bash_quote(fqname), out + "Log.final.out", out + "Log.out", out + "Log.progress.out", out + "SJ.out.tab"))
+      if paired:
+        cmd += " %s" % (bash_quote(fq_files2[current]),)
+        
+      LOGGER.info("starting STAR on '%s'", fqname)
+      LOGGER.debug(cmd)
+      jobid_bam = self._submit_lsfjob(cmd, jobname_bam, sleep=current)
+      LOGGER.debug("got job id '%s'", jobid_bam)
+      job_ids.append(jobid_bam)
+
+      current += 1
+
+    return (job_ids, out_names)
+
+  def split_and_align(self, files, genome, samplename, rcp_target=None, lcp_target=None, fileshost=None):
+    '''
+    Method used to launch the initial file splitting and bwa
+    alignments. This class also submits a job dependent on the outputs
+    of those alignments, which in turn merges the outputs to generate
+    the final bam file.
+    '''
+    #
+    # fileshost - host where the target fastq files are located. If none, the files are expected to be local and accessible cluster wide.
+    #
+
+    # Transfer files in.
+    local_files = []
+    for fn in files:
+      if fileshost is not None:
+        # Throw an error in case files host is specified but no path to the files.
+        self._get_foreign_file(fn, fileshost)
+      (path, fname) = os.path.split(fn)
+      local_files.append(fname)
+
+    # Split file(s)
+    if self.split:      
+      assert( self.merge_prog is not None )
+      fq_files = self.split_fq(local_files[0])
+    else:
+      fq_files = [local_files[0]]
+    if len(local_files) == 2:
+      if self.split:
+        fq_files2 = self.split_fq(local_files[1])
+      else:
+        fq_files2 = [local_files[1]]
+      paired = True
+    elif len(local_files) == 1:
+        fq_files2 = None
+        paired = False
+    else:
+      LOGGER.error("Too many files specified.")
+      sys.exit("Unexpected number of files passed to script.")
+
+    ## Margus (04.10.2017): Not sure if following if/else statement for output_fn filename creation is need. Looks suspicious as the output_fn for rcp case seems to contain
+    ## directory in remote host which can not be right!
+    # Construct output_fn
+    bam_fn = "%s.bam" % make_bam_name_without_extension(local_files[0])
+    if lcp_target is not None:
+      if lcp_target.endswith('.bam'):        
+        output_fn = os.path.basename(lcp_target)
+      else:
+        output_fn = os.path.join(lcp_target, bam_fn)
+      bam_fn = output_fn
+    else:
+      if rcp_target is not None:
+        if rcp_target.endswith('.bam'):
+          output_fn = os.path.join(os.path.basename(rcp_target.split(':').pop()), bam_fn)
+        else:
+          output_fn = os.path.join(rcp_target.split(':').pop(), bam_fn)
+      else:
+        LOGGER.warn("Neither lcp (%s) nor rcp (%s) has been defined. Leaving %s in cluster.", lcp_target, rcp_target, bam_fn)
+        output_fn = make_bam_name_without_extension(local_files[0])
+
+    # In case only one file, run_bwas should create bam with its final name.
+    if len(fq_files) == 1:
+      output_fn = bam_fn
+      LOGGER.warning("No splits detected. Setting output file to %s", bam_fn)
+      self.split=False
+    LOGGER.info("Saving mapping output to %s", output_fn)
+
+    # Run bwa mapping jobs for each (pair of) file(s)
+    (job_ids, bam_files) = self.run_star(genome, paired, fq_files, fq_files2, output_fn)
+    
+    LOGGER.info("Initiating merge/data transfer job for %s ...", output_fn)
+    # Merge if there is more than 1 file to merge.
+    self.queue_merge(bam_files, job_ids, output_fn, rcp_target, samplename)
+
+    
 ##############################################################################
