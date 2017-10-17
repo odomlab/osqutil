@@ -1714,6 +1714,9 @@ class StarAlignmentManager(AlignmentManager):
     # These are now identified by passing in self.conf.clusterpath to
     # the remote command.
     self.star_prog   = 'STAR'
+
+    # The capacity to split and merge aligned files has been copied from other aligners but set to False by default.
+    self.split = False
      
   def run_star(self, genome, paired, fq_files, fq_files2, output_fn):
     '''
@@ -1722,9 +1725,6 @@ class StarAlignmentManager(AlignmentManager):
     job_ids = []
     out_names = []
     current = 0
-
-    ## Tophat requires the trailing .fa to be removed.
-    ## genome = re.sub(r'\.fa$', '', genome)
 
     for fqname in fq_files:
       (donumber, facility, lanenum, _pipe) = parse_repository_filename(fqname)
