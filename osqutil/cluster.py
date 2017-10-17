@@ -875,7 +875,7 @@ class AlignmentManager(object):
     if self.group:
       cmd += " --group %s" % (self.group,)
     if samplename:
-      cmd += " --sample %s" % (samplename,)
+        cmd += " --sample %s" % (samplename,)
     cmd += " %s %s" % (bash_quote(bam_fn), input_files)
 
     LOGGER.info("preparing samtools merge on '%s'", input_files)
@@ -914,8 +914,48 @@ class AlignmentManager(object):
     Merges list of bam files.
     '''
     if len(input_fns) == 1:
-      LOGGER.warn("Moving file: %s to %s", input_fns[0], output_fn)
-      move(input_fns[0], output_fn)
+
+      # If sample name is provided we still need to add read group info.
+      if samplename is not None:
+        # We will run picard in npiper wrapper with no compression to compress with samtools for the advantage of more than one compression threads
+        m1 = "%s_m1" % bash_quote(output_fn)
+        m2 = "%s_m2" % bash_quote(output_fn)
+        cmd = "mknod %s p && mknod %s p" % (m1, m2)
+        ncmd = ("%s view -@ %d -b -u %s > %s\n"
+              % (self.samtools_prog, self.threads, input_fns[0], m1))
+        # Prepare read group information
+        (libcode, facility, lanenum, _pipeline) = parse_repository_filename(output_fn)
+        if libcode is None:
+          LOGGER.warn("Applying dummy read group information to output bam.")
+          libcode  = os.path.basename(output_fn)
+          facility = 'Unknown'
+          lanenum  = 0
+        # Command for adding read groups
+        ncmd += "picard AddOrReplaceReadGroups VALIDATION_STRINGENCY=SILENT COMPRESSION_LEVEL=0 INPUT=%s OUTPUT=%s RGLB=%s RGSM=%s RGCN=%s RGPU=%d RGPL=illumina\n" % (m1, m2, libcode, samplename, facility, int(lanenum))
+        # Command for compressing the file
+        ncmd += "samtools view -b -@ %d %s > %s\n" % (self.threads, m2, bash_quote(output_fn))
+      
+        LOGGER.debug(ncmd)
+        nfname = os.path.join(self.conf.clusterworkdir, "%s.nfile" % output_fn)
+        ret = write_to_remote_file(ncmd, nfname, self.conf.clusteruser, self.conf.cluster)
+        if ret > 0:
+          LOGGER.error("Failed to create %s:%s" % (self.conf.cluster, nfname))
+          sys.exit(1)
+        cmd += " && npiper -i %s && rm %s %s %s" % (nfname, m1, m2, nfname)
+      
+        LOGGER.debug(cmd)
+        pout = call_subprocess(cmd, shell=True,
+                               tmpdir=self.conf.clusterworkdir,
+                               path=self.conf.clusterpath)
+        for line in pout:
+          LOGGER.warn("SAMTOOLS: %s", line[:-1])
+
+      # Samplename was not provided. Just rename the file
+      else:
+        LOGGER.warn("Moving file: %s to %s", input_fns[0], output_fn)
+        move(input_fns[0], bash_quote(output_fn))
+
+    # More than one input files, hence need to merge and set the read group
     else:
       
       m1 = "%s_m1" % bash_quote(output_fn)
@@ -961,9 +1001,9 @@ class AlignmentManager(object):
       set_file_permissions(self.group, output_fn)
     if self.cleanup:
       for fname in input_fns:
-
-        # Remove input bam file, as long as it's not the only one.
-        if len(input_fns) > 1:
+#        # Remove input bam file, as long as it's not the only one.
+#        if len(input_fns) > 1:
+        if os.path.isfile(fname):
           LOGGER.info("Unlinking bam file '%s'", fname)
           os.unlink(fname)
 
@@ -1604,7 +1644,11 @@ class BwaAlignmentManager(AlignmentManager):
     (job_ids, bam_files) = self.run_bwas(genome, paired, fq_files, fq_files2, output_fn, samplename)
 
     LOGGER.info("Initiating merge/data transfer job for %s ...", output_fn)
-    # Merge if there is more than 1 file to merge.
+
+    # In case no splits sample name / readgroup info has already been added to the bam.
+    if self.split == False:
+      samplename = None
+    # Execute merge even if there is more than 1 file as merge takes care of moving data out of cluster as well    
     self.queue_merge(bam_files, job_ids, output_fn, rcp_target, samplename)
 
 ##########################################################################
@@ -1737,13 +1781,13 @@ class StarAlignmentManager(AlignmentManager):
       out_names.append(out)
 
       # Run STAR.
-      cmd = ("%s --runMode alignReads --runThreadN %d --genomeDir %s --readFilesCommand --outFilterScoreMinOverLread 0.4 --outFilterMatchNminOverLread 0.4 --readFilesIn --outFileNamePrefix %s") % (self.star_prog, self.threads, genome, out)
+      cmd = ("%s --runMode alignReads --runThreadN %d --genomeDir %s --outSAMtype BAM SortedByCoordinate --outFilterScoreMinOverLread 0.4 --outFilterMatchNminOverLread 0.4 --outFileNamePrefix %s") % (self.star_prog, self.threads, genome, out)
       if fqname.endswith('gz'):
-        cmd += " zcat --outSAMtype BAM SortedByCoordinate"
+        cmd += " --readFilesCommand zcat"
       if paired:        
-        cmd += " --outSAMunmapped Within KeepPairs %s %s" % (bash_quote(fqname),bash_quote(fq_files2[current]))
+        cmd += " --outSAMunmapped Within KeepPairs --readFilesIn %s %s" % (bash_quote(fqname),bash_quote(fq_files2[current]))
       else:
-        cmd += " --outSAMunmapped Within %s" % bash_quote(fqname)
+        cmd += " --outSAMunmapped Within --readFilesIn %s" % bash_quote(fqname)
       # Another option to consider: --outTmpDir
 
       # Merge the mapped and unmapped outputs, clean out unwanted
@@ -1751,16 +1795,16 @@ class StarAlignmentManager(AlignmentManager):
       strippedbam = "%sAligned.sortedByCoord.out.bam" % out
 
       cmd += (" && %s view -@ %d -b -F 0x100 -o %s %s"
-              % (self.samtools_prog, self.threads, strippedbam, output_fn))
+              % (self.samtools_prog, self.threads, out, strippedbam))
 
       # Clean up      
-      cmd += (" && rm -r %s %s %s %s %s" % (bash_quote(fqname), out + "Log.final.out", out + "Log.out", out + "Log.progress.out", out + "SJ.out.tab"))
+      cmd += (" && rm -r %s %s %s %s %s %s" % (bash_quote(fqname), out + "Log.final.out", out + "Log.out", out + "Log.progress.out", out + "SJ.out.tab", strippedbam))
       if paired:
         cmd += " %s" % (bash_quote(fq_files2[current]),)
         
       LOGGER.info("starting STAR on '%s'", fqname)
       LOGGER.debug(cmd)
-      jobid_bam = self._submit_lsfjob(cmd, jobname_bam, sleep=current)
+      jobid_bam = self._submit_lsfjob(cmd, jobname_bam, sleep=current, mem=int(self.conf.clustermem), threads=self.threads)
       LOGGER.debug("got job id '%s'", jobid_bam)
       job_ids.append(jobid_bam)
 

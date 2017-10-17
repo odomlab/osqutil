@@ -42,7 +42,7 @@ if __name__ == '__main__':
   PARSER.add_argument('files', metavar='<fastq file(s)>', type=str, nargs='+',
                       help='The fastq files to align.')
 
-  PARSER.add_argument('--sample', type=str, dest='sample',
+  PARSER.add_argument('--sample', type=str, dest='sample', default=None,
                       help='The sample name used to tag the output bam read group.')
 
   PARSER.add_argument('--loglevel', type=int, dest='loglevel', default=WARNING,
