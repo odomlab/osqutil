@@ -1003,9 +1003,10 @@ class AlignmentManager(object):
       for fname in input_fns:
 #        # Remove input bam file, as long as it's not the only one.
 #        if len(input_fns) > 1:
-        if os.path.isfile(fname):
-          LOGGER.info("Unlinking bam file '%s'", fname)
-          os.unlink(fname)
+        if input_fns[0] != output_fn:
+          if os.path.isfile(fname):
+            LOGGER.info("Unlinking bam file '%s'", fname)
+            os.unlink(fname)
 
   def copy_result(self, fname, destination):
     '''
