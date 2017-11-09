@@ -642,6 +642,138 @@ def transfer_file(source, destination, attempts = 2, sleeptime = 2):
     LOGGER.error("Failed to transfer %s to %s in %d attempts. Exiting!\n", source, destination, attempts)
     sys.exit(1)
 
+def dorange_to_dolist(dorange):
+
+    '''Takes string with (comma separated) range(s) of donumbers and transforms this to a list of donumbers in return.'''
+
+    codelist = []
+    
+    commaranges = dorange.split(',')
+
+    code_pattern = re.compile("^(do|DO)\d+$")
+    number_pattern = re.compile("^\d+$")
+    
+    for commarange in commaranges:
+
+        if '-' in commarange:
+            (start,end) = commarange.split('-')
+        else:
+            start = end = commarange
+        # For each comma separated range pair, check if start and end values can be interpreted
+        end_is_do = True
+        if not code_pattern.match(start):
+            LOGGER.error("[ERROR] '%s' in input string '%s' not recognized as donumber. Exiting!" % (start, dorange))
+            sys.exit(1)
+        startnumber = start[2:]
+        endnumber = None
+        if code_pattern.match(end):
+            endnumber = end[2:]
+        elif number_pattern.match(end):
+            endnumber = end
+            end_is_do = False
+        else:
+            LOGGER.error("[ERROR]'%s' in input string '%s' not recognized as donumber. Exiting!" % (start, dorange))
+            sys.exit(1)
+
+        if len(endnumber) < len(startnumber):
+            if end_is_do:
+                LOGGER.error("[ERROR] Do number ranges should be ascending. Exiting!")
+                sys.exit(1)
+            newend = list(startnumber)
+            startpos = len(newend)
+            endpos = len(endnumber)
+            while(endpos > 0):
+                newend[startpos-1] = endnumber[endpos-1]
+                startpos -= 1
+                endpos -= 1
+            endnumber = ''.join(newend)
+
+        if int(startnumber) > int(endnumber):
+            LOGGER.error("[ERROR] Do number ranges should be ascending. Exiting!")
+            sys.exit(1)
+        
+        LOGGER.warn("[INFO] Processing range do%s-do%s" % (startnumber, endnumber))
+        if startnumber == endnumber:
+            codelist.append("do%s" % startnumber)
+        else:
+            for i in range(int(startnumber), int(endnumber)):
+                code = "do%d" %i
+                codelist.append(code)
+
+    return codelist
+
+def dolist_to_dorange(codes):
+
+    '''Takes list of do numbers and converts this to comma separated list of ranges of donumbers.'''
+    # E.g. codes = ['do42','do12345','do124','do13','do43','do11','do45','do44'] is converted to "do11,do13,do42-do45,do124,do12345"
+    
+    dorange = None
+    numbers = []
+    for c in codes:
+        c = c.replace('DO','')
+        c = c.replace('do','')
+        numbers.append(int(c))
+    numbers.sort()
+    
+    ranges = []
+    start = None
+    previous = None
+    for i in range(len(numbers)):
+        if start == None:
+            start = numbers[i]
+            previous = None
+        else:
+            if previous == None:
+                if (numbers[i]-start) != 1:
+                    ranges.append("do%d" % (start))
+                    ranges.append("do%d" % (numbers[i]))
+                    start = None
+                    continue
+                else:
+                    previous = numbers[i]
+            else:
+                end = numbers[i]
+                if (end-previous) != 1:
+                    ranges.append("do%d-do%d" % (start,previous))
+                    start = numbers[i]
+                    previous = None
+                else:
+                    previous = numbers[i]
+
+    if previous is not None:
+        ranges.append("do%d-do%d" % (start,previous))
+    else:
+        if start is not None:
+            ranges.append("do%d" % (start))
+
+    dorange = ",".join(ranges)
+                      
+    return dorange
+
+def dostring_to_dorange(dostring):
+
+    '''Takes comma separated string of donumbers and condenses it to comma separated list of ranges of donumbers.'''
+    # E.g. dostring "do42 ,do12345, do124,do13,do43, do11 ,do45, do44" is converted to "do11,do13,do42-do45,do124,do12345"
+    
+    s = dostring.replace(' ','')
+    codes = s.split(',')
+    dorange = dolist_to_dorange(codes)
+
+    LOGGER.warn("Condensing \"%s\" ---> \"%s\"." % (dostring, dorange))
+
+    return dorange
+
+def dorange_to_dostring(dorange):
+
+    '''Takes comma separated string of donumber ranges and expands it to comma separated string of donumbers.'''
+    # E.g. "do11,do13,do42-do45,do124,do12345" --> "do42 ,do12345, do124,do13,do43, do11 ,do45, do44"
+    
+    dolist = dorange_to_dolist(dorange)
+    dostring = ",".join(dolist)
+    LOGGER.warn("Expanding \"%s\" ---> \"%s\"." % (dorange, dostring))
+
+    return dostring
+
 class BamPostProcessor(object):
 
   __slots__ = ('input_fn', 'output_fn', 'cleaned_fn', 'rgadded_fn',
