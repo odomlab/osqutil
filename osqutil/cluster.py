@@ -203,7 +203,7 @@ class BsubCommand(SimpleCommand):
   '''
   Class used to build a bsub-wrapped command.
   '''
-  def build(self, cmd, mem=2000, queue=None, jobname=None,
+  def build(self, cmd, mem=2000, time_limit=None, queue=None, jobname=None,
             auto_requeue=False, depend_jobs=None, sleep=0, 
             mincpus=1, maxcpus=1, clusterlogdir=None, environ=None, *args, **kwargs):
 
@@ -286,6 +286,9 @@ class BsubCommand(SimpleCommand):
     if depend_jobs is not None:
       depend = "&&".join([ "ended(%d)" % (x,) for x in depend_jobs ])
       bsubcmd += " -w '%s'" % depend
+
+    if time_limit is not None:
+      bsubcmd += " -W %d:00" % time_limit
 
     if sleep > 0:
       cmd = ('sleep %d && ' % sleep) + cmd
