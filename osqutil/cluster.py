@@ -12,7 +12,6 @@ import logging
 import glob
 import tempfile
 import uuid
-
 from subprocess import Popen, PIPE
 import time
 
@@ -188,12 +187,14 @@ class SbatchCommand(SimpleCommand):
     cmd_text += 'eval $CMD\n\n'
     cmd_text += 'echo "Job end time: `date`"\n'
     # Write sbatch file to cluster
+
     try:
       sshkey = self.conf.clustersshkey
     except AttributeError, _err:
       sshkey = None
     write_to_remote_file(cmd_text, fslurmfile, self.conf.clusteruser,
                          self.conf.cluster, append=False, sshkey=sshkey)
+
     # Create slurm command
     slurmcmd = 'sbatch %s' % fslurmfile
     
@@ -243,7 +244,7 @@ class BsubCommand(SimpleCommand):
     try:
       provider = self.conf.clusterprovider
       if provider[:3].lower() == 'san' or provider[:3].lower() == 'ebi':
-        resources = ('select[mem>%d] ' % mem) + resources
+        resources = (' select[mem>%d]' % (mem)) + resources
         memreq    = '-M %d' % mem
     except AttributeError:
       pass
@@ -291,7 +292,7 @@ class BsubCommand(SimpleCommand):
       bsubcmd += " -W %d:00" % time_limit
 
     if sleep > 0:
-      cmd = ('sleep %d && ' % sleep) + cmd
+      cmd = ('sleep %d && ' % sleep) + cm
 
     # To group things in a pipe (allowing e.g. use of '&&'), we use a
     # subshell. Note that we quote the sh -c string once, and
@@ -324,6 +325,7 @@ class JobRunner(object):
   See the ClusterJobSubmitter class for how this has been extended to
   submitting to a remote LSF head node.
   '''
+
   __slots__ = ('test_mode', 'conf', 'command_builder')
 
   def __init__(self, test_mode=False, command_builder=None, *args, **kwargs):
@@ -332,8 +334,10 @@ class JobRunner(object):
       LOGGER.setLevel(logging.DEBUG)
     else:
       LOGGER.setLevel(logging.INFO)
-      
-    self.conf = Config()
+
+    self.config = Config()
+    self.conf = Config() # There seems to be some untidiness of self.conf and self.config. In few places in in subclasses self.conf is being accessed rather than self.config.
+                         # This needs to be cleaned. For now as a quick fix, adding self.conf as well. (lukk01 2017-07-17).
 
     self.command_builder = SimpleCommand() \
         if command_builder is None else command_builder
@@ -371,6 +375,7 @@ class JobSubmitter(JobRunner):
   '''Class to run jobs via LSF/bsub on the local host (i.e., when running on the cluster).'''
   
   def __init__(self, remote_wdir=None, *args, **kwargs):
+
     conf = Config() # self.conf is set in superclass __init__
     
     if conf.clustertype == 'SLURM':
@@ -395,12 +400,12 @@ class JobSubmitter(JobRunner):
 
     # FIXME this could be farmed out to utilities?
     jobid_pattern = None
-    if self.conf.clustertype == 'LSF':
+    if self.config.clustertype == 'LSF':
       jobid_pattern = re.compile(r"Job\s+<(\d+)>\s+is\s+submitted\s+to")
-    elif self.conf.clustertype == 'SLURM':
+    elif self.config.clustertype == 'SLURM':
       jobid_pattern = re.compile(r"Submitted batch job (\d+)")
     else:
-      LOGGER.error("Unknown cluster type '%s'. Exiting.", self.conf.clustertype)
+      LOGGER.error("Unknown cluster type '%s'. Exiting.", self.config.clustertype)
       sys.exit(1)
 
     for line in pout:
@@ -409,6 +414,7 @@ class JobSubmitter(JobRunner):
         jobid = int(matchobj.group(1))
         LOGGER.info("ID of submitted job: %d", jobid)
         return jobid
+
     raise ValueError("Unable to parse job scheduler output for job ID.")
 
 class RemoteJobRunner(JobRunner):
@@ -476,7 +482,7 @@ class RemoteJobRunner(JobRunner):
               re.sub(r'"', r'\"', cmd)))
     LOGGER.debug(cmd)
     if not self.test_mode:
-      return call_subprocess(cmd, shell=True, path=self.conf.hostpath)
+      return call_subprocess(cmd, shell=True, path=self.config.hostpath)
     return None
 
   def find_remote_executable(self, progname, path=None):
@@ -542,7 +548,7 @@ class RemoteJobRunner(JobRunner):
                                 quote(destfile))]
       cmd = " ".join(cmdbits)
 
-      LOGGER.debug(cmd)
+      LOGGER.info(cmd)
       if not self.test_mode:
         call_subprocess(cmd, shell=True, path=self.conf.hostpath)
 
@@ -586,21 +592,29 @@ class RemoteJobRunner(JobRunner):
     # Copy the files across.
     self.remote_copy_files(filenames, destnames)
 
-    # Next, call uncompress any files which need it.
-    uncomp_names = []
-    for num in range(len(destnames)):
-      
-      # We have to test the file we copied over, since we'll be
-      # reading its header.
-      if is_zipped(filenames[num]):
-        uncomp = self.remote_uncompress_file(destnames[num], zipcommand='gzip')
-      elif is_bzipped(filenames[num]):
-        uncomp = self.remote_uncompress_file(destnames[num], zipcommand='bzip2')
-      else:
-        uncomp = os.path.join(self.remote_wdir, destnames[num])
-      uncomp_names.append(uncomp)
-
-    return uncomp_names
+    # Following uncompressing is not needed any more as the pipeline works on compressed files.
+    # However, we need to provide names with full remote path.
+    remote_names = []
+    for destname in destnames:
+       rname = os.path.join(self.remote_wdir, destname)
+       remote_names.append(rname)
+    return remote_names
+    
+#    # Next, call uncompress any files which need it.
+#    uncomp_names = []
+#    for num in range(len(destnames)):
+#      
+#      # We have to test the file we copied over, since we'll be
+#      # reading its header.
+#      if is_zipped(filenames[num]):
+#        uncomp = self.remote_uncompress_file(destnames[num], zipcommand='gzip')
+#      elif is_bzipped(filenames[num]):
+#        uncomp = self.remote_uncompress_file(destnames[num], zipcommand='bzip2')
+#      else:
+#        uncomp = os.path.join(self.remote_wdir, destnames[num])
+#      uncomp_names.append(uncomp)
+#
+#    return uncomp_names
   
   def submit(self, *args, **kwargs):
     '''
@@ -620,7 +634,7 @@ class ClusterJobSubmitter(RemoteJobRunner):
 
   def __init__(self, remote_wdir=None, *args, **kwargs):
 
-    conf        = Config() # self.conf is set in superclass __init__
+    conf = Config() # self.conf is set in superclass __init__
     self.remote_host = conf.cluster
     self.remote_port = conf.clusterport
     self.remote_user = conf.clusteruser
@@ -654,10 +668,9 @@ class ClusterJobSubmitter(RemoteJobRunner):
     BsubCommand.build(). The return value is the integer LSF job ID.
     '''    
     pout = super(ClusterJobSubmitter, self).\
-           submit_command(cmd,
-                          path=self.conf.clusterpath,
-                          *args, **kwargs)
-
+        submit_command(cmd,
+                       path=self.conf.clusterpath,
+                       *args, **kwargs)
     jobid_pattern = None
     if self.conf.clustertype == 'LSF':
       jobid_pattern = re.compile(r"Job\s+<(\d+)>\s+is\s+submitted\s+to")
@@ -692,12 +705,12 @@ class ClusterJobRunner(RemoteJobRunner):
     self.remote_wdir = conf.clusterworkdir if remote_wdir is None else remote_wdir
 
     try:
-      self.transfer_host = conf.transferhost
+      self.transfer_host = self.conf.transferhost
     except AttributeError, _err:
       LOGGER.debug("Falling back to cluster host for transfer.")
       self.transfer_host = self.remote_host
     try:
-      self.transfer_wdir = conf.transferdir
+      self.transfer_wdir = self.conf.transferdir
     except AttributeError, _err:
       LOGGER.debug("Falling back to cluster remote directory for transfer.")
       self.transfer_wdir = self.remote_wdir
@@ -770,6 +783,9 @@ class AlignmentManager(object):
     self.cleanup       = cleanup
     self.group         = group
     self.debug         = debug    
+
+    if self.merge_prog is None:
+      self.merge_prog = 'cs_runBwaWithSplit_Merge.py'
     
     self._configure_logging(self.__class__.__name__, LOGGER)
     LOGGER.setLevel(loglevel)
@@ -795,7 +811,7 @@ class AlignmentManager(object):
     hdlr.setFormatter(fmt)
     hdlr.setLevel(min(logger.getEffectiveLevel(), logging.WARN))
     logger.addHandler(hdlr)
-
+        
   def split_fq(self, fastq_fn):
     '''
     Splits fastq file to self.split_read_count reads per file using
@@ -862,14 +878,16 @@ class AlignmentManager(object):
     if self.group:
       cmd += " --group %s" % (self.group,)
     if samplename:
-      cmd += " --sample %s" % (samplename,)
+        cmd += " --sample %s" % (samplename,)
     cmd += " %s %s" % (bash_quote(bam_fn), input_files)
 
     LOGGER.info("preparing samtools merge on '%s'", input_files)
     LOGGER.debug(cmd)
 
     jobname = bam_files[0].split("_")[0] + "bam"
-    jobid = self._submit_lsfjob(cmd, jobname, depend, mem=12000)
+
+    jobid = self._submit_lsfjob(cmd, jobname, depend, mem=12000, threads=self.threads) # Merge does not require much memory but as many cores as possible for compression is good.
+
     LOGGER.debug("got job id '%s'", jobid)
 
   def _submit_lsfjob(self, command, jobname, depend=None, sleep=0, mem=12000, threads=1):
@@ -899,8 +917,48 @@ class AlignmentManager(object):
     Merges list of bam files.
     '''
     if len(input_fns) == 1:
-      LOGGER.warn("Moving file: %s to %s", input_fns[0], output_fn)
-      move(input_fns[0], output_fn)
+
+      # If sample name is provided we still need to add read group info.
+      if samplename is not None:
+        # We will run picard in npiper wrapper with no compression to compress with samtools for the advantage of more than one compression threads
+        m1 = "%s_m1" % bash_quote(output_fn)
+        m2 = "%s_m2" % bash_quote(output_fn)
+        cmd = "mknod %s p && mknod %s p" % (m1, m2)
+        ncmd = ("%s view -@ %d -b -u %s > %s\n"
+              % (self.samtools_prog, self.threads, input_fns[0], m1))
+        # Prepare read group information
+        (libcode, facility, lanenum, _pipeline) = parse_repository_filename(output_fn)
+        if libcode is None:
+          LOGGER.warn("Applying dummy read group information to output bam.")
+          libcode  = os.path.basename(output_fn)
+          facility = 'Unknown'
+          lanenum  = 0
+        # Command for adding read groups
+        ncmd += "picard AddOrReplaceReadGroups VALIDATION_STRINGENCY=SILENT COMPRESSION_LEVEL=0 INPUT=%s OUTPUT=%s RGLB=%s RGSM=%s RGCN=%s RGPU=%d RGPL=illumina\n" % (m1, m2, libcode, samplename, facility, int(lanenum))
+        # Command for compressing the file
+        ncmd += "samtools view -b -@ %d %s > %s\n" % (self.threads, m2, bash_quote(output_fn))
+      
+        LOGGER.debug(ncmd)
+        nfname = os.path.join(self.conf.clusterworkdir, "%s.nfile" % output_fn)
+        ret = write_to_remote_file(ncmd, nfname, self.conf.clusteruser, self.conf.cluster)
+        if ret > 0:
+          LOGGER.error("Failed to create %s:%s" % (self.conf.cluster, nfname))
+          sys.exit(1)
+        cmd += " && npiper -i %s && rm %s %s %s" % (nfname, m1, m2, nfname)
+      
+        LOGGER.debug(cmd)
+        pout = call_subprocess(cmd, shell=True,
+                               tmpdir=self.conf.clusterworkdir,
+                               path=self.conf.clusterpath)
+        for line in pout:
+          LOGGER.warn("SAMTOOLS: %s", line[:-1])
+
+      # Samplename was not provided. Just rename the file
+      else:
+        LOGGER.warn("Moving file: %s to %s", input_fns[0], output_fn)
+        move(input_fns[0], bash_quote(output_fn))
+
+    # More than one input files, hence need to merge and set the read group
     else:
       
       m1 = "%s_m1" % bash_quote(output_fn)
@@ -946,33 +1004,37 @@ class AlignmentManager(object):
       set_file_permissions(self.group, output_fn)
     if self.cleanup:
       for fname in input_fns:
+#        # Remove input bam file, as long as it's not the only one.
+#        if len(input_fns) > 1:
+        if input_fns[0] != output_fn:
+          if os.path.isfile(fname):
+            LOGGER.info("Unlinking bam file '%s'", fname)
+            os.unlink(fname)
 
-        # Remove input bam file, as long as it's not the only one.
-        if len(input_fns) > 1:
-          LOGGER.info("Unlinking bam file '%s'", fname)
-          os.unlink(fname)
-
-  def copy_result(self, target, fname):
+  def copy_result(self, fname, destination):
     '''
-    Copies file to target location.
+    Copies file to destination.
     '''
-    qname = bash_quote(fname)    
-    cmd = "scp -p -q %s %s" % (qname, target)
+    qname = bash_quote(fname)
+    # Scp is not efficient, replacing with rsync on low encryption
+    # cmd = "scp -p -q %s %s" % (qname, destination)
+    cmd = "rsync -a -e \"ssh -o StrictHostKeyChecking=no -c aes128-cbc\" %s %s" % (qname, destination)
+    print cmd
     LOGGER.debug(cmd)
     pout = call_subprocess(cmd, shell=True,
                            tmpdir=self.conf.clusterworkdir,
                            path=self.conf.clusterpath)
     count = 0
     for line in pout:
-      LOGGER.warn("SCP: %s", line[:-1])
+      LOGGER.warn("rsync: %s", line[:-1])
       count += 1
     if count > 0:
-      LOGGER.error("Got errors from scp, quitting.")
+      LOGGER.error("Got errors from rsync, quitting.")
       sys.exit("No files transferred.")
-    flds = target.split(":")
+    flds = destination.split(":")
     if len(flds) == 2: # there's a machine and path
       fn_base = os.path.basename(qname)
-      cmd = "ssh %s touch %s/%s.done" % (flds[0], flds[1], bash_quote(fn_base))
+      cmd = "ssh -o StrictHostKeyChecking=no %s touch %s/%s.done" % (flds[0], flds[1], bash_quote(fn_base))
       LOGGER.debug(cmd)
       call_subprocess(cmd, shell=True,
                       tmpdir=self.conf.clusterworkdir,
@@ -1052,8 +1114,8 @@ class AlignmentManager(object):
     # LOGGER.info("ran picard cleanup on '%s' creating '%s'", merge_fn, output_fn)
     
     if rcp_target:
-      self.copy_result(rcp_target, output_fn)
-      LOGGER.info("copied '%s' to '%s'", output_fn, rcp_target)
+      self.copy_result(output_fn, rcp_target)
+      LOGGER.info("Copied '%s' to '%s'.", output_fn, rcp_target)
 
 ##############################################################################
 
@@ -1102,18 +1164,51 @@ class BwaAlignmentManager(AlignmentManager):
     outbam      = outbambase + ".bam"
 
     readgroup = ""
+
+    quoted_fqnames = [bash_quote(fqname), bash_quote(fqname2), bash_quote(fqname), bash_quote(fqname2)]
+    ncommands = ""
+    cmd = ""
+    acmd = ""
+    
     # Check if readgroup information should be added by bwa
     if self.split is False:
       readgroup = "-R %s" % self._make_readgroup_string(output_fn, samplename)
       outbam     = output_fn
       outbambase = outbam.rstrip('.bam')
 
+      # in case files were not split, commands may need to be added to uncompress files on fly
+      # NB! Assuming that fqname2 has been similarly compressed
+      if fqname.endswith('.gz'):
+        p011 = "%s_p011" % fqname
+        p012 = "%s_p012" % fqname
+        p021 = "%s_p021" % fqname2
+        p022 = "%s_p022" % fqname2
+        cmd += "mknod %s p && mknod %s p && mknod %s p && mknod %s p && sleep 1 && " % (p011, p012, p021, p022)
+        ncommands += "zcat %s > %s\n" % (bash_quote(fqname), p011)
+        ncommands += "zcat %s > %s\n" % (bash_quote(fqname), p012)
+        ncommands += "zcat %s > %s\n" % (bash_quote(fqname2), p021)
+        ncommands += "zcat %s > %s\n" % (bash_quote(fqname2), p022)
+        acmd = "&& rm %s %s %s %s" % (p011, p012, p021, p022)
+        quoted_fqnames = [p011, p021, p012, p022]
+      if fqname.endswith('.bz2'):
+        p011 = "%s_p011" % fqname
+        p012 = "%s_p012" % fqname
+        p021 = "%s_p021" % fqname2
+        p022 = "%s_p022" % fqname2
+        cmd += "mknod %s p && mknod %s p && mknod %s p && mknod %s p && sleep 1 && " % (p011, p012, p021, p022)
+        ncommands += "pzcat %s > %s\n" % (bash_quote(fqname), p011)
+        ncommands += "pzcat %s > %s\n" % (bash_quote(fqname), p012)
+        ncommands += "pzcat %s > %s\n" % (bash_quote(fqname2), p021)
+        ncommands += "pzcat %s > %s\n" % (bash_quote(fqname2), p022)
+        acmd = "&& rm %s %s %s %s" % (p011, p012, p021, p022)
+        quoted_fqnames = [p011, p021, p012, p022]
+      
     # Run bwa aln
     cmd1 = "%s aln -t %d %s %s %s > %s" % (self.bwa_prog, self.threads, readgroup, genome,
-                                  bash_quote(fqname),
+                                  quoted_fqnames[0],
                                   bash_quote(sai_file1))
     cmd2 = "%s aln -t %d %s %s %s > %s" % (self.bwa_prog, self.threads, readgroup, genome,
-                                  bash_quote(fqname2),
+                                  quoted_fqnames[1],
                                   bash_quote(sai_file2))
 
     # Variables for picard tools
@@ -1129,9 +1224,9 @@ class BwaAlignmentManager(AlignmentManager):
     cmd3 = "mknod %s p && mknod %s p && mknod %s p && sleep 1" % (p1, p2, p3)
     
     # Run bwa sampe
-    ncommands  = ("%s sampe %s %s %s %s %s %s"
+    ncommands += ("%s sampe %s %s %s %s %s %s"
              % (self.bwa_prog, self.nocc, genome, bash_quote(sai_file1),
-                bash_quote(sai_file2), bash_quote(fqname), bash_quote(fqname2)))
+                bash_quote(sai_file2), quoted_fqnames[2], quoted_fqnames[3]))
 
     # Convert to bam
     ncommands += (" | %s view -b -S -u - > %s\n" % (self.samtools_prog, p1))
@@ -1160,7 +1255,7 @@ class BwaAlignmentManager(AlignmentManager):
       LOGGER.error("Failed to create %s:%s" % (self.conf.cluster, nfname))
       sys.exit(1)
 
-    cmd3 += " && npiper -i %s && rm %s %s %s %s %s %s %s" % (nfname, bash_quote(fqname), p1, p2, p3, nfname, sai_file1, sai_file2)
+    cmd3 += " && npiper -i %s && rm %s %s %s %s %s %s %s %s" % (nfname, bash_quote(fqname), p1, p2, p3, nfname, sai_file1, sai_file2, acmd)
 
     LOGGER.info("starting bwa step1 on '%s'", fqname)
     
@@ -1188,15 +1283,37 @@ class BwaAlignmentManager(AlignmentManager):
     jobname_bam = "%s_bam" % (jobtag,)
     outbambase  = bash_quote(fqname)
     outbam      = outbambase + ".bam"
-
+    
     readgroup = ""
+
+    quoted_fqname = [bash_quote(fqname), bash_quote(fqname)]
+    ncommands = ""
+    cmd = ""
+    acmd = ""
+        
     # Check if readgroup information should be added by bwa
     if self.split is False:
       readgroup = "-R %s" % self._make_readgroup_string(output_fn, samplename)
       outbam     = output_fn
       outbambase = outbam.rstrip('.bam')
 
-
+      # in case files were not split, commands may need to be added to uncompress files on fly
+      if fqname.endswith('.gz'):
+        p01 = "%s_p01" % fqname
+        p02 = "%s_p02" % fqname
+        cmd = "mknod %s p && mknod %s p && sleep 1 && " % (p01, p02)
+        ncommands += "zcat %s > %s\n" % (bash_quote(fqname), p01)
+        ncommands += "zcat %s > %s\n" % (bash_quote(fqname), p02)
+        acmd = "&& rm %s %s" % (p01, p02)
+        quoted_fqname = [p01, p02]
+      if fqname.endswith('.bz2'):
+        p01 = "%s_p01" % fqname
+        p02 = "%s_p02" % fqname
+        cmd = "mknod %s p && mknod %s p && sleep 1 && " % (p01, p02)
+        ncommands += "bzcat %s > %s\n" % (bash_quote(fqname), p01)
+        ncommands += "bzcat %s > %s\n" % (bash_quote(fqname), p02)
+        acmd = "&& rm %s %s" % (p01, p02)
+      quoted_fqname = [p01, p02]
 
     # Variables for picard tools
     # Some options are universal. Consider also adding QUIET=true, VERBOSITY=ERROR, TMP_DIR=DBCONF.tmpdir.
@@ -1208,14 +1325,14 @@ class BwaAlignmentManager(AlignmentManager):
     p2 = "%s_p2" % fqname
     p3 = "%s_p3" % fqname
 
-    cmd = "mknod %s p && mknod %s p && mknod %s p && sleep 1" % (p1, p2, p3)
+    cmd += "mknod %s p && mknod %s p && mknod %s p && sleep 1" % (p1, p2, p3)
     
     # Run bwa aln
-    ncommands = ("%s aln -t %d %s %s %s" % (self.bwa_prog, self.threads, readgroup, genome, bash_quote(fqname)))
+    ncommands += ("%s aln -t %d %s %s %s" % (self.bwa_prog, self.threads, readgroup, genome, quoted_fqname[0]))
 
     # Run bwa samse
     ncommands += (" | %s samse %s %s - %s" % (self.bwa_prog, self.nocc,
-                                        genome, bash_quote(fqname)))
+                                        genome, quoted_fqname[1]))
     # Convert to bam
     ncommands += (" | %s view -b -S -u - > %s\n" % (self.samtools_prog, p1))
     
@@ -1244,7 +1361,7 @@ class BwaAlignmentManager(AlignmentManager):
       LOGGER.error("Failed to create %s:%s" % (self.conf.cluster, nfname))
       sys.exit(1)
 
-    cmd += " && npiper -i %s && rm %s %s %s %s %s" % (nfname, bash_quote(fqname), p1, p2, p3, nfname)
+    cmd += " && npiper -i %s && rm %s %s %s %s %s %s" % (nfname, bash_quote(fqname), p1, p2, p3, nfname, acmd)
     
     LOGGER.info("starting bwa on '%s'", fqname)
     LOGGER.debug(cmd)
@@ -1276,16 +1393,38 @@ class BwaAlignmentManager(AlignmentManager):
     jobname_bam = "%s_bam" % (jobtag,)
     outbambase  = bash_quote(fqnames[0])
     outbam      = outbambase + ".bam"
-
+    
     readgroup = ""
+
+    ncommands = ""
+    cmd = ""
+    acmd = ""
+    quoted_fqnames = " ".join([ bash_quote(fqn) for fqn in fqnames ])
+
     # Check if readgroup information should be added by bwa
     if self.split is False:
       readgroup = "-R %s" % self._make_readgroup_string(output_fn, samplename)
       outbam     = output_fn
       outbambase = outbam.rstrip('.bam')
-      
-    quoted_fqnames = " ".join([ bash_quote(fqn) for fqn in fqnames ])
 
+      # in case files were not split, commands may need to be added to uncompress files on fly
+      if fqnames[0].endswith('.gz'):
+        p01 = "%s_p01" % fqnames[0]
+        p02 = "%s_p02" % fqnames[0]
+        cmd += "mknod %s p && mknod %s p && sleep 1 && " % (p01, p02)
+        ncommands += "zcat %s > %s\n" % (bash_quote(fqnames[0]), p01)
+        ncommands += "zcat %s > %s\n" % (bash_quote(fqnames[1]), p02)
+        quoted_fqnames = "%s %s" % (p01, p02)
+        acmd = "&& rm %s %s" % (p01, p02)
+      if fqnames[0].endswith('.bz2'):
+        p01 = "%s_p01" % fqnames[0]
+        p02 = "%s_p02" % fqnames[0]
+        cmd += "mknod %s p && mknod %s p && sleep 1 && " % (p01, p02)
+        ncommands += "bzcat %s > %s\n" % (bash_quote(fqnames[0]),p01)
+        ncommands += "bzcat %s > %s\n" % (bash_quote(fqnames[1]),p02)
+        quoted_fqnames = "%s %s" % (p01, p02)
+        acmd = "&& rm %s %s" % (p01, p02)
+        
     # Variables for picard tools
     # Some options are universal. Consider also adding QUIET=true, VERBOSITY=ERROR, TMP_DIR=DBCONF.tmpdir.
     # Though, no the picard commands below should not require write of any temporary files.
@@ -1296,10 +1435,10 @@ class BwaAlignmentManager(AlignmentManager):
     p2 = "%s_p2" % fqnames[0]
     p3 = "%s_p3" % fqnames[0]
 
-    cmd = "mknod %s p && mknod %s p && mknod %s p && sleep 1" % (p1, p2, p3)
-    
+    cmd += "mknod %s p && mknod %s p && mknod %s p && sleep 1" % (p1, p2, p3)
+
     # Run bwa mem
-    ncommands = "%s mem %s -t %d %s %s" % (self.bwa_prog, readgroup, self.threads, genome, quoted_fqnames)
+    ncommands += "%s mem %s -t %d %s %s" % (self.bwa_prog, readgroup, self.threads, genome, quoted_fqnames)    
 
     # Run sam to bam conversion
     ncommands += (" | %s view -b -S -u - > %s\n" % (self.samtools_prog, p1))
@@ -1332,7 +1471,8 @@ class BwaAlignmentManager(AlignmentManager):
       sys.exit(1)
 
     # Run npiper and clean up temporary files.
-    cmd += " && npiper -i %s && rm %s %s %s %s %s" % (nfname, p1, p2, p3, nfname, quoted_fqnames)
+#    cmd += " && npiper -i %s && rm %s %s %s %s %s %s" % (nfname, p1, p2, p3, nfname, quoted_fqnames, acmd)
+    cmd += " && npiper -i %s && rm %s %s %s %s %s %s" % (nfname, p1, p2, p3, nfname, quoted_fqnames, acmd)
     
     LOGGER.info("Starting bwa mem on fastq files: %s", quoted_fqnames)
     LOGGER.debug(cmd)
@@ -1406,9 +1546,9 @@ class BwaAlignmentManager(AlignmentManager):
     except AttributeError, _err:
       transferhost = None
     if transferhost is not None:
-      cmd = "ssh %s@%s \"rsync -a -e \\\"ssh -o StrictHostKeyChecking=no\\\" %s@%s:%s %s\"" % (self.conf.clusteruser, transferhost, self.conf.clusteruser, host, bash_quote(fn), os.path.join(self.conf.clusterworkdir, bash_quote(fname)) )
+      cmd = "ssh %s@%s \"rsync -a -e \\\"ssh -o StrictHostKeyChecking=no -c aes128-cbc\\\" %s@%s:%s %s\"" % (self.conf.clusteruser, transferhost, self.conf.clusteruser, host, bash_quote(fn), os.path.join(self.conf.clusterworkdir, bash_quote(fname)) )
     else:
-      cmd = "rsync -a -e \"ssh -o StrictHostKeyChecking=no\" %s@%s:%s %s" % (self.conf.clusteruser, host, bash_quote(fn), bash_quote(fname) )
+      cmd = "rsync -a -e \"ssh -o StrictHostKeyChecking=no -c aes128-cbc\" %s@%s:%s %s" % (self.conf.clusteruser, host, bash_quote(fn), bash_quote(fname) )
 
     LOGGER.info("Downloading %s" % (fname))
     
@@ -1434,8 +1574,7 @@ class BwaAlignmentManager(AlignmentManager):
         
     if retcode !=0:
       raise StandardError("ERROR. Failed to transfer file. Command was:\n   %s\n"
-                  % (" ".join(cmd),) )
-    
+                  % (" ".join(cmd),) )    
     time_diff = time.time() - start_time
     LOGGER.info("%s transferred in %d seconds." % (fname, time_diff) )
     
@@ -1477,7 +1616,9 @@ class BwaAlignmentManager(AlignmentManager):
     else:
       LOGGER.error("Too many files specified.")
       sys.exit("Unexpected number of files passed to script.")
-        
+
+    ## Margus (04.10.2017): Not sure if following if/else statement for output_fn filename creation is need. Looks suspicious as the output_fn for rcp case seems to contain
+    ## directory in remote host which can not be right!
     # Construct output_fn
     bam_fn = "%s.bam" % make_bam_name_without_extension(local_files[0])
     if lcp_target is not None:
@@ -1495,21 +1636,24 @@ class BwaAlignmentManager(AlignmentManager):
       else:
         LOGGER.warn("Neither lcp (%s) nor rcp (%s) has been defined. Leaving %s in cluster.", lcp_target, rcp_target, bam_fn)
         output_fn = make_bam_name_without_extension(local_files[0])
-    LOGGER.info("Saving mapping output to %s", output_fn)
 
     # In case only one file, run_bwas should create bam with its final name.
     if len(fq_files) == 1:
       output_fn = bam_fn
       LOGGER.warning("No splits detected. Setting output file to %s", bam_fn)
       self.split=False
+    LOGGER.info("Saving mapping output to %s", output_fn)
 
     # Run bwa mapping jobs for each (pair of) file(s)
     (job_ids, bam_files) = self.run_bwas(genome, paired, fq_files, fq_files2, output_fn, samplename)
 
-    # Merge if there is more than 1 file to merge.
-    if self.split:
-      self.queue_merge(bam_files, job_ids, bam_fn, rcp_target, samplename)
+    LOGGER.info("Initiating merge/data transfer job for %s ...", output_fn)
 
+    # In case no splits sample name / readgroup info has already been added to the bam.
+    if self.split == False:
+      samplename = None
+    # Execute merge even if there is more than 1 file as merge takes care of moving data out of cluster as well    
+    self.queue_merge(bam_files, job_ids, output_fn, rcp_target, samplename)
 
 ##########################################################################
     
@@ -1605,4 +1749,145 @@ class TophatAlignmentManager(AlignmentManager):
     self.queue_merge(bam_files, job_ids, bam_fn, rcp_target, samplename)
 
 
+##########################################################################
+    
+class StarAlignmentManager(AlignmentManager):
+  '''
+  Subclass of AlignmentManager implementing the STAR-specific
+  components of our primary alignment pipeline.
+  '''
+  def __init__(self, *args, **kwargs):
+    super(StarAlignmentManager, self).__init__(*args, **kwargs)
+
+    # These are now identified by passing in self.conf.clusterpath to
+    # the remote command.
+    self.star_prog   = 'STAR'
+
+    # The capacity to split and merge aligned files has been copied from other aligners but set to False by default.
+    self.split = False
+     
+  def run_star(self, genome, paired, fq_files, fq_files2, output_fn):
+    '''
+    Submits STAR alignment jobs for list of fq files to cluster.
+    '''
+    job_ids = []
+    out_names = []
+    current = 0
+
+    for fqname in fq_files:
+      (donumber, facility, lanenum, _pipe) = parse_repository_filename(fqname)
+
+      # Used as a job ID and also as an output directory, so we want
+      # it fairly collision-resistant.
+      jobname_bam = "%s_STAR" % fqname
+
+      out = bash_quote(fqname + ".bam")
+      out_names.append(out)
+
+      # Run STAR.
+      cmd = ("%s --runMode alignReads --runThreadN %d --genomeDir %s --outSAMtype BAM SortedByCoordinate --outFilterScoreMinOverLread 0.4 --outFilterMatchNminOverLread 0.4 --outFileNamePrefix %s") % (self.star_prog, self.threads, genome, out)
+      if fqname.endswith('gz'):
+        cmd += " --readFilesCommand zcat"
+      if paired:        
+        cmd += " --outSAMunmapped Within KeepPairs --readFilesIn %s %s" % (bash_quote(fqname),bash_quote(fq_files2[current]))
+      else:
+        cmd += " --outSAMunmapped Within --readFilesIn %s" % bash_quote(fqname)
+      # Another option to consider: --outTmpDir
+
+      # Merge the mapped and unmapped outputs, clean out unwanted
+      # secondary alignments. Note, STAR sort the output bams by default.
+      strippedbam = "%sAligned.sortedByCoord.out.bam" % out
+
+      cmd += (" && %s view -@ %d -b -F 0x100 -o %s %s"
+              % (self.samtools_prog, self.threads, out, strippedbam))
+
+      # Clean up      
+      cmd += (" && rm -r %s %s %s %s %s %s" % (bash_quote(fqname), out + "Log.final.out", out + "Log.out", out + "Log.progress.out", out + "SJ.out.tab", strippedbam))
+      if paired:
+        cmd += " %s" % (bash_quote(fq_files2[current]),)
+        
+      LOGGER.info("starting STAR on '%s'", fqname)
+      LOGGER.debug(cmd)
+      jobid_bam = self._submit_lsfjob(cmd, jobname_bam, sleep=current, mem=int(self.conf.clustermem), threads=self.threads)
+      LOGGER.debug("got job id '%s'", jobid_bam)
+      job_ids.append(jobid_bam)
+
+      current += 1
+
+    return (job_ids, out_names)
+
+  def split_and_align(self, files, genome, samplename, rcp_target=None, lcp_target=None, fileshost=None):
+    '''
+    Method used to launch the initial file splitting and bwa
+    alignments. This class also submits a job dependent on the outputs
+    of those alignments, which in turn merges the outputs to generate
+    the final bam file.
+    '''
+    #
+    # fileshost - host where the target fastq files are located. If none, the files are expected to be local and accessible cluster wide.
+    #
+
+    # Transfer files in.
+    local_files = []
+    for fn in files:
+      if fileshost is not None:
+        # Throw an error in case files host is specified but no path to the files.
+        self._get_foreign_file(fn, fileshost)
+      (path, fname) = os.path.split(fn)
+      local_files.append(fname)
+
+    # Split file(s)
+    if self.split:      
+      assert( self.merge_prog is not None )
+      fq_files = self.split_fq(local_files[0])
+    else:
+      fq_files = [local_files[0]]
+    if len(local_files) == 2:
+      if self.split:
+        fq_files2 = self.split_fq(local_files[1])
+      else:
+        fq_files2 = [local_files[1]]
+      paired = True
+    elif len(local_files) == 1:
+        fq_files2 = None
+        paired = False
+    else:
+      LOGGER.error("Too many files specified.")
+      sys.exit("Unexpected number of files passed to script.")
+
+    ## Margus (04.10.2017): Not sure if following if/else statement for output_fn filename creation is need. Looks suspicious as the output_fn for rcp case seems to contain
+    ## directory in remote host which can not be right!
+    # Construct output_fn
+    bam_fn = "%s.bam" % make_bam_name_without_extension(local_files[0])
+    if lcp_target is not None:
+      if lcp_target.endswith('.bam'):        
+        output_fn = os.path.basename(lcp_target)
+      else:
+        output_fn = os.path.join(lcp_target, bam_fn)
+      bam_fn = output_fn
+    else:
+      if rcp_target is not None:
+        if rcp_target.endswith('.bam'):
+          output_fn = os.path.join(os.path.basename(rcp_target.split(':').pop()), bam_fn)
+        else:
+          output_fn = os.path.join(rcp_target.split(':').pop(), bam_fn)
+      else:
+        LOGGER.warn("Neither lcp (%s) nor rcp (%s) has been defined. Leaving %s in cluster.", lcp_target, rcp_target, bam_fn)
+        output_fn = make_bam_name_without_extension(local_files[0])
+
+    # In case only one file, run_bwas should create bam with its final name.
+    if len(fq_files) == 1:
+      output_fn = bam_fn
+      LOGGER.warning("No splits detected. Setting output file to %s", bam_fn)
+      self.split=False
+    LOGGER.info("Saving mapping output to %s", output_fn)
+
+    # Run bwa mapping jobs for each (pair of) file(s)
+    (job_ids, bam_files) = self.run_star(genome, paired, fq_files, fq_files2, output_fn)
+    
+    LOGGER.info("Initiating merge/data transfer job for %s ...", output_fn)
+    # Merge if there is more than 1 file to merge.
+    self.queue_merge(bam_files, job_ids, output_fn, rcp_target, samplename)
+
+    
 ##############################################################################

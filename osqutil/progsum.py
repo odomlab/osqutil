@@ -136,6 +136,7 @@ class ProgramSummary(object):
     '''
     vstrings = ["--version", "-v", " 2>&1 | grep \'[V|v]ersion\'"]
     vpattern = re.compile(r"v?((?:\d+[._-])*\d+)")
+    vpattern2 = re.compile(r"STAR_(\d\.\d.\d.*)")
 
     if ssh_host is None:
       program = os.path.join(self.path, self.program)
@@ -161,6 +162,14 @@ class ProgramSummary(object):
         vmatch = vpattern.search(err)
         if vmatch:
           version = vmatch.group(1)
+      # search with second pattern designed for STAR
+      vmatch = vpattern2.search(out)
+      if vmatch:
+        version = vmatch.group(1)
+      else:
+        vmatch = vpattern.search(err)
+        if vmatch:
+          version = vmatch.group(1)      
       if version is not None:
         if re.search(r'\.', version):
           # If the version contains periods, remove any leading or
@@ -172,4 +181,3 @@ class ProgramSummary(object):
           version = [ x for x in version.split('-') if re.search('\\.', x) ][0]
         return version
     return None
-
