@@ -617,8 +617,10 @@ def transfer_file(source, destination, attempts = 2, sleeptime = 2):
   if ':' in source or ':' in destination:
     sshflag = '-e \"ssh -o StrictHostKeyChecking=no -c aes128-cbc\"'
 
-  # cmd used to have -R option as well, not sure why it was included. Removed by lukk01 24/07
-  cmd = "rsync -a --chmod=Du=rwx,Dg=r,Do=,Fu=rw,Fg=r,Fo= --chown=%s:%s %s %s %s" % (DBCONF.user, DBCONF.group, sshflag, source, destination)
+  # cmd used to have -R option as well, not sure why it was included. Removed by lukk01 24/07  
+  # Following has been commented out as rsync in slurm cluster is behind in versions and does not have --chown option.
+  #cmd = "rsync -a --chmod=Du=rwx,Dg=r,Do=,Fu=rw,Fg=r,Fo= --chown=%s:%s %s %s %s" % (DBCONF.user, DBCONF.group, sshflag, source, destination)
+  cmd = "rsync -a --chmod=Du=rwx,Dg=r,Do=,Fu=rw,Fg=r,Fo= %s %s %s" % (sshflag, source, destination)
   LOGGER.debug(cmd)
   
   a = attempts
