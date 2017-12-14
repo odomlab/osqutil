@@ -605,7 +605,7 @@ def run_in_communication_host(argv):
   
   sys.exit(retcode)
 
-def transfer_file(source, destination, attempts = 2, sleeptime = 2):
+def transfer_file(source, destination, attempts = 2, sleeptime = 2, set_ownership=False):
   '''Transfers file from source to destination using rsync. Either source or destination can be a foreign host,
   in which case the string is expected to contain username@host:path.'''
 
@@ -619,8 +619,10 @@ def transfer_file(source, destination, attempts = 2, sleeptime = 2):
 
   # cmd used to have -R option as well, not sure why it was included. Removed by lukk01 24/07  
   # Following has been commented out as rsync in slurm cluster is behind in versions and does not have --chown option.
-  cmd = "rsync -a --chmod=Du=rwx,Dg=r,Do=,Fu=rw,Fg=r,Fo= --chown=%s:%s %s %s %s" % (DBCONF.user, DBCONF.group, sshflag, source, destination)
-  # cmd = "rsync -a --chmod=Du=rwx,Dg=r,Do=,Fu=rw,Fg=r,Fo= %s %s %s" % (sshflag, source, destination)
+  if set_ownership:
+    cmd = "rsync -a --chmod=Du=rwx,Dg=r,Do=,Fu=rw,Fg=r,Fo= --chown=%s:%s %s %s %s" % (DBCONF.user, DBCONF.group, sshflag, source, destination)
+  else:
+    cmd = "rsync -a --chmod=Du=rwx,Dg=r,Do=,Fu=rw,Fg=r,Fo= %s %s %s" % (sshflag, source, destination)
   LOGGER.debug(cmd)
   
   a = attempts
