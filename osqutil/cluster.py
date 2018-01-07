@@ -1464,11 +1464,11 @@ class BwaAlignmentManager(AlignmentManager):
     # Run samtools sort
     # If files have not been split, compress output
     if compress_output:
-      ncommands += ("%s sort -o %s -@ %d %s%s\n" % (self.samtools_prog, outbambase + ".bam", self.sortthreads, mem_string, p3))
-      # ncommands += ("%s sort -@ %d %s%s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
+      # ncommands += ("%s sort -o %s -@ %d %s%s\n" % (self.samtools_prog, outbambase + ".bam", self.sortthreads, mem_string, p3))
+      ncommands += ("%s sort -@ %d %s%s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
     else:
-      ncommands += ("%s sort -o %s -l 0 -@ %d %s%s\n" % (self.samtools_prog, outbambase + ".bam", self.sortthreads, mem_string, p3))
-      # ncommands += ("%s sort -l 0 -@ %d %s%s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
+      # ncommands += ("%s sort -o %s -l 0 -@ %d %s%s\n" % (self.samtools_prog, outbambase + ".bam", self.sortthreads, mem_string, p3))
+      ncommands += ("%s sort -l 0 -@ %d %s%s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
 
     # write ncommands to nfname
     nfname = os.path.join(self.conf.clusterworkdir, "%s.nfile" % fqnames[0])
