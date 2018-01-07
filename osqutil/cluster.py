@@ -1409,7 +1409,7 @@ class BwaAlignmentManager(AlignmentManager):
         p01 = "%s_p01" % fqnames[0]
         cmd += "mknod %s p && sleep 1 && " % (p01)
         ncommands += "zcat %s > %s\n" % (bash_quote(fqnames[0]), p01)
-        quoted_fqnames += " %s" % (p01)
+        quoted_fqnames = "%s" % (p01)
         acmd = "rm %s" % (p01)
         if len(fqnames) == 2:
           p02 = "%s_p02" % fqnames[0]
@@ -1421,7 +1421,7 @@ class BwaAlignmentManager(AlignmentManager):
         p01 = "%s_p01" % fqnames[0]
         cmd += "mknod %s p && sleep 1 && " % (p01)
         ncommands += "bzcat %s > %s\n" % (bash_quote(fqnames[0]),p01)
-        quoted_fqnames += " %s" % (p01)
+        quoted_fqnames = "%s" % (p01)
         acmd = "rm %s" % (p01)
         if len(fqnames) == 2:
           p02 = "%s_p02" % fqnames[0]
@@ -1443,7 +1443,7 @@ class BwaAlignmentManager(AlignmentManager):
     cmd += "mknod %s p && mknod %s p && mknod %s p && sleep 1" % (p1, p2, p3)
 
     # Run bwa mem
-    ncommands += "%s mem %s -t %d %s %s" % (self.bwa_prog, readgroup, self.threads, genome, quoted_fqnames)    
+    ncommands += "%s mem %s -t %d %s %s" % (self.bwa_prog, readgroup, self.threads, genome, quoted_fqnames)
 
     # Run sam to bam conversion
     ncommands += (" | %s view -b -S -u - > %s\n" % (self.samtools_prog, p1))
@@ -1464,9 +1464,11 @@ class BwaAlignmentManager(AlignmentManager):
     # Run samtools sort
     # If files have not been split, compress output
     if compress_output:
-      ncommands += ("%s sort -@ %d %s%s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
+      ncommands += ("%s sort -o %s -@ %d %s%s\n" % (self.samtools_prog, outbambase + ".bam", self.sortthreads, mem_string, p3))
+      # ncommands += ("%s sort -@ %d %s%s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
     else:
-      ncommands += ("%s sort -l 0 -@ %d %s%s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
+      ncommands += ("%s sort -o %s -l 0 -@ %d %s%s\n" % (self.samtools_prog, outbambase + ".bam", self.sortthreads, mem_string, p3))
+      # ncommands += ("%s sort -l 0 -@ %d %s%s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
 
     # write ncommands to nfname
     nfname = os.path.join(self.conf.clusterworkdir, "%s.nfile" % fqnames[0])
