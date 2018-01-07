@@ -1410,25 +1410,25 @@ class BwaAlignmentManager(AlignmentManager):
         cmd += "mknod %s p && sleep 1 && " % (p01)
         ncommands += "zcat %s > %s\n" % (bash_quote(fqnames[0]), p01)
         quoted_fqnames = "%s" % (p01)
-        acmd = "&& rm %s" % (p01)
+        acmd = "&& rm %s" % (bash_quote(fqnames[0]))
         if len(fqnames) == 2:
           p02 = "%s_p02" % fqnames[0]
           cmd += "mknod %s p && sleep 1 && " % (p02)
           ncommands += "zcat %s > %s\n" % (bash_quote(fqnames[1]), p02)
           quoted_fqnames += " %s" % (p02)
-          acmd += " %s" % (p02)
+          acmd += " %s" % (bash_quote(fqnames[1]))
       if fqnames[0].endswith('.bz2'):
         p01 = "%s_p01" % fqnames[0]
         cmd += "mknod %s p && sleep 1 && " % (p01)
         ncommands += "bzcat %s > %s\n" % (bash_quote(fqnames[0]),p01)
         quoted_fqnames = "%s" % (p01)
-        acmd = "&& rm %s" % (p01)
+        acmd = "&& rm %s" % (bash_quote(fqnames[0]))
         if len(fqnames) == 2:
           p02 = "%s_p02" % fqnames[0]
           cmd += "mknod %s p && sleep 1 && " % (p02)
           ncommands += "bzcat %s > %s\n" % (bash_quote(fqnames[1]),p02)
           quoted_fqnames += " %s" % (p02)
-          acmd += " %s" % (p02)
+          acmd += " %s" % (bash_quote(fqnames[1]))
 
     # Variables for picard tools
     # Some options are universal. Consider also adding QUIET=true, VERBOSITY=ERROR, TMP_DIR=DBCONF.tmpdir.
