@@ -1407,21 +1407,29 @@ class BwaAlignmentManager(AlignmentManager):
       # in case files were not split, commands may need to be added to uncompress files on fly
       if fqnames[0].endswith('.gz'):
         p01 = "%s_p01" % fqnames[0]
-        p02 = "%s_p02" % fqnames[0]
-        cmd += "mknod %s p && mknod %s p && sleep 1 && " % (p01, p02)
+        cmd += "mknod %s p && sleep 1 && " % (p01)
         ncommands += "zcat %s > %s\n" % (bash_quote(fqnames[0]), p01)
-        ncommands += "zcat %s > %s\n" % (bash_quote(fqnames[1]), p02)
-        quoted_fqnames = "%s %s" % (p01, p02)
-        acmd = "&& rm %s %s" % (p01, p02)
+        quoted_fqnames = "%s" % (p01)
+        acmd = "&& rm %s" % (p01)
+        if len(fqnames) == 2:
+          p02 = "%s_p02" % fqnames[0]
+          cmd += "mknod %s p && sleep 1 && " % (p02)
+          ncommands += "zcat %s > %s\n" % (bash_quote(fqnames[1]), p02)
+          quoted_fqnames += " %s" % (p02)
+          acmd += " && rm %s" % (p02)
       if fqnames[0].endswith('.bz2'):
         p01 = "%s_p01" % fqnames[0]
-        p02 = "%s_p02" % fqnames[0]
-        cmd += "mknod %s p && mknod %s p && sleep 1 && " % (p01, p02)
+        cmd += "mknod %s p && sleep 1 && " % (p01)
         ncommands += "bzcat %s > %s\n" % (bash_quote(fqnames[0]),p01)
-        ncommands += "bzcat %s > %s\n" % (bash_quote(fqnames[1]),p02)
-        quoted_fqnames = "%s %s" % (p01, p02)
-        acmd = "&& rm %s %s" % (p01, p02)
-        
+        quoted_fqnames = "%s" % (p01)
+        acmd = "&& rm %s" % (p01)
+        if len(fqnames) == 2:
+          p02 = "%s_p02" % fqnames[0]
+          cmd += "mknod %s p && sleep 1 && " % (p02)
+          ncommands += "bzcat %s > %s\n" % (bash_quote(fqnames[1]),p02)
+          quoted_fqnames = " %s" % (p02)
+          acmd = " && rm %s" % (p02)
+
     # Variables for picard tools
     # Some options are universal. Consider also adding QUIET=true, VERBOSITY=ERROR, TMP_DIR=DBCONF.tmpdir.
     # Though, no the picard commands below should not require write of any temporary files.
