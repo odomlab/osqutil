@@ -499,7 +499,7 @@ def sanitize_samplename(samplename):
   '''
   if samplename is None:
     return None
-  sanity_re = re.compile(r'([ \/\(\);&|]+)')
+  sanity_re = re.compile(r'([ \\\/\(\)\"\*:;&|<>]+)')
   return(sanity_re.sub('_', samplename))
 
 def determine_readlength(fastq):
