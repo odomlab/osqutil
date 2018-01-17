@@ -708,16 +708,24 @@ def dorange_to_dolist(dorange):
 
 def dolist_to_dorange(codes):
 
-    '''Takes list of do numbers and converts this to comma separated list of ranges of donumbers.'''
+    '''Takes list of do numbers and converts this to comma separated list
+    of ranges of donumbers. Codes which are not proper donumbers are
+    appended to the output list (example: Universal human reference
+    RNA, which is occasionally included in the Genomics LIMS ID listing.
+    '''
     # E.g. codes = ['do42','do12345','do124','do13','do43','do11','do45','do44'] is converted to "do11,do13,do42-do45,do124,do12345"
     
     dorange = None
     numbers = []
+    others  = []
     for c in codes:
-        c = c.replace('DO','')
-        c = c.replace('do','')
-        numbers.append(int(c))
+        ci = re.sub('^DO', '', c, flags=re.I)
+        if re.match('^\d+$', ci):
+          numbers.append(int(ci))
+        else:
+          others.append(c)
     numbers.sort()
+    others.sort()
     
     ranges = []
     start = None
@@ -750,8 +758,11 @@ def dolist_to_dorange(codes):
         if start is not None:
             ranges.append("do%d" % (start))
 
-    dorange = ",".join(ranges)
+    if len(others) > 0:
+      ranges += others
                       
+    dorange = ",".join(ranges)
+
     return dorange
 
 def dostring_to_dorange(dostring):
