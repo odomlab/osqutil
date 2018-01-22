@@ -479,7 +479,7 @@ def parse_incoming_fastq_name(fname, ext='.fq'):
   initial download and demultiplexing process. The values matched by
   the regex are: library code (or list of library codes as stored in
   the LIMS); flowcell ID; flowcell lane; flow pair (1 or 2 at
-  present).'''
+  present). The ext argument can contain a regex fragment if desired.'''
 
   # Keep this in sync with the output of build_incoming_fastq_name.
   # Pattern altered to match the new filenames coming in from the
