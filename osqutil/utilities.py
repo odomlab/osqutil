@@ -624,7 +624,7 @@ def transfer_file(source, destination, attempts = 2, sleeptime = 2, set_ownershi
   else:
     cmd = "rsync -a --chmod=Du=rwx,Dg=r,Do=,Fu=rw,Fg=r,Fo= %s %s %s" % (sshflag, source, destination)
   LOGGER.debug(cmd)
-  
+
   a = attempts
   while a > 0:
     subproc = Popen(cmd, stdout=PIPE, stderr=PIPE, shell=True)
@@ -645,6 +645,11 @@ def transfer_file(source, destination, attempts = 2, sleeptime = 2, set_ownershi
   if retcode != 0:
     LOGGER.error("Failed to transfer %s to %s in %d attempts. Exiting!\n", source, destination, attempts)
     sys.exit(1)
+
+  # This is a backup in case the rsync --chown option fails to work
+  # (required to provide web access to files).
+  if set_ownership and ':' not in destination: # i.e. destination is a local file
+    set_file_permissions(DBCONF.group, destination)
 
 def dorange_to_dolist(dorange):
 
