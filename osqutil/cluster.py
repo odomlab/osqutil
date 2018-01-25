@@ -1244,9 +1244,9 @@ class BwaAlignmentManager(AlignmentManager):
     if mem > 300:
       mem_string = " -m %dM" % mem
     if compress_output:
-      ncommands += ("%s sort -@ %d%s %s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
+      ncommands += ("%s sort -@ %d%s -o %s.bam %s\n" % (self.samtools_prog, self.sortthreads, mem_string, outbambase, p3))
     else:
-      ncommands += ("%s sort -l 0 -@ %d%s %s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
+      ncommands += ("%s sort -l 0 -@ %d%s -o %s.bam %s\n" % (self.samtools_prog, self.sortthreads, mem_string, outbambase, p3))
 
     # write ncommands to nfname
     nfname = os.path.join(self.conf.clusterworkdir, "%s.nfile" % fqname)
@@ -1350,9 +1350,9 @@ class BwaAlignmentManager(AlignmentManager):
       mem_string = "-m %dM " % mem
     # Run samtools sort
     if compress_output:
-      ncommands += ("%s sort -@ %d %s%s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
+      ncommands += ("%s sort -@ %d %s -o %s.bam %s\n" % (self.samtools_prog, self.sortthreads, mem_string, outbambase, p3))
     else:
-      ncommands += ("%s sort -l 0 -@ %d %s%s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
+      ncommands += ("%s sort -l 0 -@ %d %s -o %s.bam %s\n" % (self.samtools_prog, self.sortthreads, mem_string, outbambase, p3))
     
     # write ncommands to nfname
     nfname = os.path.join(self.conf.clusterworkdir, "%s.nfile" % fqname)
@@ -1467,11 +1467,9 @@ class BwaAlignmentManager(AlignmentManager):
     # Run samtools sort
     # If files have not been split, compress output
     if compress_output:
-      # ncommands += ("%s sort -o %s -@ %d %s%s\n" % (self.samtools_prog, outbambase + ".bam", self.sortthreads, mem_string, p3))
-      ncommands += ("%s sort -@ %d %s%s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
+      ncommands += ("%s sort -@ %d %s -o %s.bam %s\n" % (self.samtools_prog, self.sortthreads, mem_string, outbambase, p3))
     else:
-      # ncommands += ("%s sort -o %s -l 0 -@ %d %s%s\n" % (self.samtools_prog, outbambase + ".bam", self.sortthreads, mem_string, p3))
-      ncommands += ("%s sort -l 0 -@ %d %s%s %s\n" % (self.samtools_prog, self.sortthreads, mem_string, p3, outbambase))
+      ncommands += ("%s sort -l 0 -@ %d %s -o %s.bam %s\n" % (self.samtools_prog, self.sortthreads, mem_string, outbambase, p3))
 
     # write ncommands to nfname
     nfname = os.path.join(self.conf.clusterworkdir, "%s.nfile" % fqnames[0])
