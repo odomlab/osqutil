@@ -479,7 +479,7 @@ def parse_incoming_fastq_name(fname, ext='.fq'):
   initial download and demultiplexing process. The values matched by
   the regex are: library code (or list of library codes as stored in
   the LIMS); flowcell ID; flowcell lane; flow pair (1 or 2 at
-  present).'''
+  present). The ext argument can contain a regex fragment if desired.'''
 
   # Keep this in sync with the output of build_incoming_fastq_name.
   # Pattern altered to match the new filenames coming in from the
@@ -499,7 +499,7 @@ def sanitize_samplename(samplename):
   '''
   if samplename is None:
     return None
-  sanity_re = re.compile(r'([ \/\(\);&|]+)')
+  sanity_re = re.compile(r'([ \\\/\(\)\"\*:;&|<>]+)')
   return(sanity_re.sub('_', samplename))
 
 def determine_readlength(fastq):
@@ -605,7 +605,7 @@ def run_in_communication_host(argv):
   
   sys.exit(retcode)
 
-def transfer_file(source, destination, attempts = 2, sleeptime = 2):
+def transfer_file(source, destination, attempts = 2, sleeptime = 2, set_ownership=False):
   '''Transfers file from source to destination using rsync. Either source or destination can be a foreign host,
   in which case the string is expected to contain username@host:path.'''
 
@@ -619,8 +619,10 @@ def transfer_file(source, destination, attempts = 2, sleeptime = 2):
 
   # cmd used to have -R option as well, not sure why it was included. Removed by lukk01 24/07  
   # Following has been commented out as rsync in slurm cluster is behind in versions and does not have --chown option.
-  #cmd = "rsync -a --chmod=Du=rwx,Dg=r,Do=,Fu=rw,Fg=r,Fo= --chown=%s:%s %s %s %s" % (DBCONF.user, DBCONF.group, sshflag, source, destination)
-  cmd = "rsync -a --chmod=Du=rwx,Dg=r,Do=,Fu=rw,Fg=r,Fo= %s %s %s" % (sshflag, source, destination)
+  if set_ownership:
+    cmd = "rsync -a --chmod=Du=rwx,Dg=r,Do=,Fu=rw,Fg=r,Fo= --chown=%s:%s %s %s %s" % (DBCONF.user, DBCONF.group, sshflag, source, destination)
+  else:
+    cmd = "rsync -a --chmod=Du=rwx,Dg=r,Do=,Fu=rw,Fg=r,Fo= %s %s %s" % (sshflag, source, destination)
   LOGGER.debug(cmd)
   
   a = attempts
@@ -706,16 +708,24 @@ def dorange_to_dolist(dorange):
 
 def dolist_to_dorange(codes):
 
-    '''Takes list of do numbers and converts this to comma separated list of ranges of donumbers.'''
+    '''Takes list of do numbers and converts this to comma separated list
+    of ranges of donumbers. Codes which are not proper donumbers are
+    appended to the output list (example: Universal human reference
+    RNA, which is occasionally included in the Genomics LIMS ID listing.
+    '''
     # E.g. codes = ['do42','do12345','do124','do13','do43','do11','do45','do44'] is converted to "do11,do13,do42-do45,do124,do12345"
     
     dorange = None
     numbers = []
+    others  = []
     for c in codes:
-        c = c.replace('DO','')
-        c = c.replace('do','')
-        numbers.append(int(c))
+        ci = re.sub('^DO', '', c, flags=re.I)
+        if re.match('^\d+$', ci):
+          numbers.append(int(ci))
+        else:
+          others.append(c)
     numbers.sort()
+    others.sort()
     
     ranges = []
     start = None
@@ -748,8 +758,11 @@ def dolist_to_dorange(codes):
         if start is not None:
             ranges.append("do%d" % (start))
 
-    dorange = ",".join(ranges)
+    if len(others) > 0:
+      ranges += others
                       
+    dorange = ",".join(ranges)
+
     return dorange
 
 def dostring_to_dorange(dostring):
