@@ -135,8 +135,11 @@ class ProgramSummary(object):
     server depending on wheth ssh_host is set or not.
     '''
     vstrings = ["--version", "-v", " 2>&1 | grep \'[V|v]ersion\'"]
-    vpattern = re.compile(r"v?((?:\d+[._-])*\d+)")
-    vpattern2 = re.compile(r"STAR_(\d\.\d.\d.*)")
+
+    # A set of regexes with increasing lenience.
+    vpatterns = [ re.compile(r"(?:\b|_)version *((?:\d+[._-])*\d+\w?)\b"),
+                  re.compile(r"(?:\b|_)v*((?:\d+[._-])*\d+\w?)\b"),
+                  re.compile(r"v?((?:\d+[._-])*\d+\w?)") ]
 
     if ssh_host is None:
       program = os.path.join(self.path, self.program)
@@ -155,21 +158,17 @@ class ProgramSummary(object):
       proc = subprocess.Popen(program + " " + vstring, stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE, shell=True)
       (out, err) = proc.communicate()
-      vmatch = vpattern.search(out)
-      if vmatch:
-        version = vmatch.group(1)
-      else:
-        vmatch = vpattern.search(err)
+      for vpattern in vpatterns:
+        vmatch = vpattern.search(out)
         if vmatch:
           version = vmatch.group(1)
-      # search with second pattern designed for STAR
-      vmatch = vpattern2.search(out)
-      if vmatch:
-        version = vmatch.group(1)
-      else:
-        vmatch = vpattern.search(err)
-        if vmatch:
-          version = vmatch.group(1)      
+          break
+        else:
+          vmatch = vpattern.search(err)
+          if vmatch:
+            version = vmatch.group(1)
+            break
+
       if version is not None:
         if re.search(r'\.', version):
           # If the version contains periods, remove any leading or
