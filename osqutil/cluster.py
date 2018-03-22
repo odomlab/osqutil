@@ -292,7 +292,7 @@ class BsubCommand(SimpleCommand):
       bsubcmd += " -W %d:00" % time_limit
 
     if sleep > 0:
-      cmd = ('sleep %d && ' % sleep) + cm
+      cmd = ('sleep %d && ' % sleep) + cmd
 
     # To group things in a pipe (allowing e.g. use of '&&'), we use a
     # subshell. Note that we quote the sh -c string once, and
