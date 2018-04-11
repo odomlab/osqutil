@@ -1313,7 +1313,7 @@ class BwaAlignmentManager(AlignmentManager):
         ncommands += "bzcat %s > %s\n" % (bash_quote(fqname), p01)
         ncommands += "bzcat %s > %s\n" % (bash_quote(fqname), p02)
         acmd = "&& rm %s %s" % (p01, p02)
-      quoted_fqname = [p01, p02]
+        quoted_fqname = [p01, p02]
 
     # Variables for picard tools
     # Some options are universal. Consider also adding QUIET=true, VERBOSITY=ERROR, TMP_DIR=DBCONF.tmpdir.
