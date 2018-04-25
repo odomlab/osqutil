@@ -6,6 +6,13 @@ This package, "osqutil", contains code supporting various scripts used
 in the lab. The package is designed to rely solely on python modules
 which are installed as part of the base python distribution.
 
+The package has been released as-is, and comes with no promise of any
+support from its authors. The code was developed specifically to
+address the needs of the Odom Lab during its residence at the CRUK
+Cambridge Institute, and as such contains many optimisations which may
+not be fit for purpose in other computational infrastructure
+environments. Please see the LICENSE.txt file for further disclaimers.
+
 Quick start
 -----------
 
@@ -107,7 +114,10 @@ here, or in "hint" attributes in the XML config itself.
 Credits
 -------
 
-The sequencing pipeline code in this package was originally developed
-by Gord Brown working with the Odom and Carroll labs. Additional
-features were implemented by Margus Lukk and Tim Rayner. The codebase
-was refactored and migrated to use the Django framework by Tim Rayner.
+The code in this package is the product of a joint sequencing effort
+by Gord Brown, Tim Rayner and Margus Lukk during the years of Odom Lab
+operation at the CRUK Cambridge Institute. The sequencing pipeline
+code in this package was originally developed by Gord Brown working
+with the Odom and Carroll labs. Additional features were implemented
+by Margus Lukk and Tim Rayner. The codebase was refactored and
+migrated to use the Django framework by Tim Rayner.
