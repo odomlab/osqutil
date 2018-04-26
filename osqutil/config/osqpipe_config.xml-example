@@ -1,28 +1,84 @@
 <?xml version="1.0"?>
 <config>
+  <!-- COPY THIS FILE TO ./osqpipe_config.xml AND EDIT THE OPTIONS BELOW: -->
   <section name="Host">
-    <option name="user">fnc-odompipe</option>
-    <option name="datahost">uk-cri-lsrv01</option>
-    <option name="group">odompipe</option>
-    <option name="defaultproject">all</option>
+    <option name="datahost">my_dataprocessing_server</option>           <!-- The fully qualified domain name or IP address for your main data processing server -->
+    <option name="user">my_username</option>                            <!-- The username under which this pipeline is run on that data processing server -->
+    <option name="group">my_group_name</option>                         <!-- The group to which processed data files will be assigned -->
+    <option name="defaultproject">all</option>                          <!-- The repository database project to which all libraries are assigned -->
+    <option name="communicationhost">dolab-srv006</option>              <!-- -->
   </section>
-  <section name="some test ideas">
-    <option name="list_value">
-      <value>item 1</value>
-      <value>item 2</value>
+  <section name="Cluster">
+    <option name="clustertype">SLURM</option>                           <!-- The type of compute cluster being used. Currently, 'LSF' and 'SLURM' are supported -->
+    <option name="cluster">my_cluster_headnode</option>                 <!-- The fully qualified domain name or IP address for your cluster headnode -->
+    <option name="clusterport">22</option>                              <!-- The ssh port to use for connection to that cluster headnode -->
+    <option name="clusteruser">my_username</option>                     <!-- The username under which jobs are submitted on the cluster headnode -->
+    <option name="clusterstdoutdir">/path/to/logging/directory</option> <!-- The log directory to use on the cluster -->
+    <option name="clusterworkdir">/path/to/temporary/file/area</option> <!-- The data processing directory to use on the cluster -->
+    <option name="clusterpath">/usr/local/bin:/usr/bin:/bin</option>    <!-- A full path specification, needed to allow the pipeline code to find external applications on the cluster -->
+    <option name="clustergenomedir">/path/to/genomes/directory</option> <!-- Path to a directory containing indexed genomes on the cluster (for alignments) -->
+    <option name="clusterqueue">general</option>                        <!-- Cluster queue name to use for job submissions -->
+    <option name="clusterprovider">ci</option>                          <!-- Values 'ebi', 'san' and 'ci'. clusterprovider is referred in class BsubCommand(SimpleCommand) but so far not used in config. -->
+    <option name="splitbwarunlog">/path/to/logging/directory/cs_runBwaWithSplit.log</option> <!-- A specific log file for daughter alignment processes -->
+<!-- Uncomment the following and set the appropriate fqdn/IP address in case data transfers to and from the node should go through a specific server, rather than the cluster headnode:
+    <option name="transferhost">my_transfer_host</option> -->
+<!-- Uncomment the following and set it if it differs at all from clusterworkdir:
+     <option name="transferdir">/path/to/temporary/file/area</option> -->
+<!-- Uncomment the following and set it if your password-free ssh key is not selected as default.
+     <option name="clustersshkey">/path/to/.ssh/id_rsa</option> -->
+  </section>
+  <section name="Processing">
+    <option name="num_threads">20</option>                              <!-- The number of threads to request when submitting cluster jobs -->
+    <option name="num_threads_sort">1</option>                          <!-- Number of threads specifically used for bam file sorting -->
+    <option name="clustermem">50000</option>                            <!-- Memory to request (in MB). Note that the mem required is not necessarily proportional to the number of threads. For 1-4 threads, 8GB (i.e. 8000MB) is in most cases more than sufficient -->
+    <option name="clustersortmem">5000</option>                         <!-- Memory to request (in MB) for part of clustermem that can be used for samtools sorting. -->
+    <option name="compressintermediates">False</option>                 <!-- Whether to compress intermediate SAM files to BAM to save space at the cost of speed. -->
+  </section>
+  <section name="Lims">
+    <option name="lims_rest_uri">https://limsserver/lims_rest_uri</option> <!-- The URI to use to access the upstream LIMS REST API. At CRUK-CI, this is a custom-maintained Genologics LIMS, and so non-CRUK-CI users will need to modify the LIMS interface code appropriately. -->
+  </section>
+  <section name="Path">
+    <option name="gzsuffix">.gz</option>                                <!-- Standard gzipped file suffix; this will probably not need changing. -->  
+    <option name="httptmpdir">/var/www/html/chipseq/tmp</option>        <!-- A temporary file directory which can be written to by the webserver user (e.g., apache) -->
+    <option name="httptmpurl">/chipseq/tmp</option>                     <!-- The URL fragment used to point to that temporary file area within a web browser -->
+    <option name="incoming">/data01/incoming</option>                   <!-- The initial directory to which files are downloaded from the upstream LIMS -->
+    <option name="repositorydir">/data02/repository</option>            <!-- The directory to save files which have been processed through the cluster alignment pipeline -->
+    <option name="hostpath">/bin:/usr/bin:/usr/local/bin</option>       <!-- A full path specification, needed to allow the pipeline code to find external applications on the main data processing server -->
+    <option name="genomesizedir">/path/to/chromosome_sizes</option>     <!-- A directory containing chromosome sizes files (as output by fetchChromSizes) on the main data processing server -->
+    <option name="tmpdir">/tmp</option>                                 <!-- A temporary directory on the main data processing server -->
+    <option name="default_archive">archive1</option>                    <!-- The repository ArchiveLocation name to use as a default when archiving older data files. -->
+  </section>
+  <section name="Pipeline">
+    <option name="aligner">bwa</option>                                 <!-- The primary aligner program for WGS, WXS, ChIP-seq etc. Note that RNA-seq and HiC aligners are managed as special cases in the code -->
+    <option name="meminbytes">20000000000</option>                      <!-- The amount of memory (in bytes) to request when running the primary aligner program. -->
+    <option name="read_reallocator">reallocateReads</option>            <!-- polIII tRNA pull-downs only; this application reallocates multimapping reads to mimic the distribution seen in the monomapping set (dubious). -->
+    <option name="read_sorter">samtools</option>                        <!-- The bam file sorting application (will almost always be samtools). -->
+    <option name="nonuniquereads">30</option>                           <!-- The number of nonunique reads to keep in the read reallocation pipeline -->
+    <option name="reallocation_factors">                                <!-- The ChIP-seq factors for which read reallocation is activated -->
+      <value>PolIII</value>
+      <value>RNAP3</value>
     </option>
-    <option name="dict_value">
-      <value name="key name 1">value 1</value>
-      <value name="key name 2">value 2</value>
-      <value name="key name 3 (sublist)">
-        <value>list item 3</value>
-        <value>list item 4</value>
-      </value>
-      <value name="key name 4 (subdict)">
-        <value name="dict key 3">dict value 3</value>
-        <value name="dict key 4">dict value 4</value>          
-      </value>
+    <option name="nonquant_libtypes">                                   <!-- Repository libtypes for which wig/bgr/bw file creation is inappropriate. -->
+      <value>genome</value>
+      <value>exome</value>
+    </option>
+    <option name="xcor_libtypes">                                       <!-- Repository libtypes for which we want cross-correlation analysis to be run. -->
+      <value>chipseq</value>
+      <value>cutandrun</value>
+    </option>
+    <option name="core_facility_code">CRI</option>                      <!-- The main core sequencing facility code as listed in the repository. -->
+    <option name="core_ready_status">core pipeline complete</option>    <!-- A status code used to detect libraries ready for our pipeline processing (not fully implemented or tested) -->
+  </section>
+  <section name="Email">
+    <option name="smtp_server">smtp.cri.camres.org</option>             <!-- The fully-qualified domain name of your SMTP server to be used for sending emails -->
+    <option name="smtp_sender">user@host.org</option>                   <!-- The email address to use as the sender of automated email -->
+  </section>
+  <section name="ControlledVocabs">                                     <!-- Site-specific addenda to the controlled vocabs maintained in the repository itself -->
+    <option name="genome_synonyms">                                     <!-- An example listing of the mapping used between informal genome designations (e.g. Mmus) and the currently used genome code (mm10) -->
+      <option name="Cfam">canFam3</option>
+      <option name="Hsap">hg19</option>
+      <option name="Mmus">mm10</option>
+      <option name="Rnor">rn6</option>
     </option>
   </section>
 </config>
-
